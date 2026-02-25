@@ -9,13 +9,12 @@ from PyQt6.QtWidgets import (
     QAbstractItemView
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
-from PyQt6.QtGui import QIcon, QPixmap
+from PyQt6.QtGui import QFont
 
 
 class GallerySection(QWidget):
     file_selected = pyqtSignal(str)
 
-    # --- SIZE MODES ---
     SMALL = (140, 170, 120)
     MEDIUM = (190, 220, 170)
     LARGE = (240, 260, 220)
@@ -23,7 +22,6 @@ class GallerySection(QWidget):
     def __init__(self):
         super().__init__()
 
-        # Default mode = Large (your current one)
         self.current_mode = "large"
         self.TILE_WIDTH, self.TILE_HEIGHT, self.ICON_SIZE = self.LARGE
 
@@ -31,9 +29,7 @@ class GallerySection(QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)
 
-        # ===============================
-        # HEADER (Title + Size Button)
-        # ===============================
+        # ================= HEADER =================
         header_container = QWidget()
         header_layout = QHBoxLayout(header_container)
         header_layout.setContentsMargins(10, 5, 10, 5)
@@ -44,18 +40,25 @@ class GallerySection(QWidget):
             font-weight: bold;
         """)
 
-        self.btn_size_toggle = QPushButton("Large")
-        self.btn_size_toggle.setFixedHeight(28)
+        # Light square symbols for better visibility
+        self.btn_size_toggle = QPushButton("⬜")  # Large default
+        self.btn_size_toggle.setFixedSize(42, 30)
         self.btn_size_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        font = QFont("Segoe UI Symbol", 14)
+        self.btn_size_toggle.setFont(font)
+
         self.btn_size_toggle.setStyleSheet("""
             QPushButton {
-                background-color: #333;
-                color: white;
+                background-color: #2d2d30;
+                color: #ffffff;
                 border-radius: 6px;
-                padding: 4px 10px;
+                border: 1px solid #3e3e42;
+                padding: 0px;
+                text-align: center;
             }
             QPushButton:hover {
-                background-color: #444;
+                background-color: #3a3a3d;
             }
         """)
 
@@ -70,20 +73,15 @@ class GallerySection(QWidget):
 
         self.layout.addWidget(header_container)
 
-        # ===============================
-        # LIST WIDGET (Grid)
-        # ===============================
+        # ================= GALLERY GRID =================
         self.list_widget = QListWidget()
         self.list_widget.setViewMode(QListWidget.ViewMode.IconMode)
-
         self.list_widget.setIconSize(QSize(self.ICON_SIZE, self.ICON_SIZE))
         self.list_widget.setGridSize(QSize(self.TILE_WIDTH, self.TILE_HEIGHT))
-
         self.list_widget.setUniformItemSizes(True)
         self.list_widget.setSpacing(0)
         self.list_widget.setWordWrap(False)
         self.list_widget.setTextElideMode(Qt.TextElideMode.ElideRight)
-
         self.list_widget.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.list_widget.setMovement(QListWidget.Movement.Static)
         self.list_widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -116,25 +114,23 @@ class GallerySection(QWidget):
 
         self.layout.addWidget(self.list_widget)
 
-    # ===============================
-    # SIZE TOGGLE LOGIC
-    # ===============================
+    # ================= SIZE TOGGLE =================
     def toggle_size_mode(self):
 
         if self.current_mode == "large":
             self.current_mode = "medium"
             width, height, icon = self.MEDIUM
-            self.btn_size_toggle.setText("Medium")
+            self.btn_size_toggle.setText("◻")
 
         elif self.current_mode == "medium":
             self.current_mode = "small"
             width, height, icon = self.SMALL
-            self.btn_size_toggle.setText("Small")
+            self.btn_size_toggle.setText("▫")
 
         else:
             self.current_mode = "large"
             width, height, icon = self.LARGE
-            self.btn_size_toggle.setText("Large")
+            self.btn_size_toggle.setText("⬜")
 
         self.TILE_WIDTH = width
         self.TILE_HEIGHT = height
@@ -147,16 +143,13 @@ class GallerySection(QWidget):
             item = self.list_widget.item(i)
             item.setSizeHint(QSize(width, height))
 
-    # ===============================
-    # POPULATE GRID
-    # ===============================
+    # ================= POPULATE =================
     def populate(self, items):
         self.list_widget.clear()
 
         for name, path, is_video in items:
             item = QListWidgetItem(name)
             item.setData(Qt.ItemDataRole.UserRole, path)
-
             item.setSizeHint(QSize(self.TILE_WIDTH, self.TILE_HEIGHT))
             item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
             item.setToolTip(name)
@@ -168,9 +161,7 @@ class GallerySection(QWidget):
 
             self.list_widget.addItem(item)
 
-    # ===============================
-    # CLICK EVENT
-    # ===============================
+    # ================= CLICK =================
     def on_item_clicked(self, item):
         path = item.data(Qt.ItemDataRole.UserRole)
         self.file_selected.emit(path)
