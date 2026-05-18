@@ -1,14 +1,16 @@
 import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTreeView, 
                              QSplitter, QLabel, QPushButton, QScrollArea, QFrame, 
-                             QSlider, QStyle, QLineEdit) # <-- ADD QLineEdit HERE
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QMouseEvent, QPixmap
+                             QSlider, QStyle, QLineEdit, QScrollBar)
+from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QMouseEvent, QPixmap, QIcon
 from PyQt6.QtMultimediaWidgets import QVideoWidget
+from PyQt6.QtCore import pyqtSignal
 
 # Import our custom Gallery
 from Src.Ui.gallery import GallerySection
-
+from Src.Ui.reader_widget import ManhwaReaderWidget
+from Src.Logic.paths import resource_path
 # --- CUSTOM SLIDER ---
 class JumpSlider(QSlider):
     def mousePressEvent(self, event: QMouseEvent):
@@ -19,7 +21,24 @@ class JumpSlider(QSlider):
             event.accept()
         super().mousePressEvent(event)
 
-# --- WINDOWS 11 STYLE VIDEO CONTAINER ---
+class CustomVideoWidget(QVideoWidget):
+    skip_forward_signal = pyqtSignal()
+    skip_backward_signal = pyqtSignal()
+    toggle_play_signal = pyqtSignal()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Left:
+            self.skip_backward_signal.emit()
+
+        elif event.key() == Qt.Key.Key_Right:
+            self.skip_forward_signal.emit()
+
+        elif event.key() == Qt.Key.Key_Space:
+            self.toggle_play_signal.emit()
+
+        else:
+            super().keyPressEvent(event)
+
 class VideoContainer(QWidget):
     def __init__(self, main_window):
         super().__init__()
@@ -29,7 +48,9 @@ class VideoContainer(QWidget):
         self.layout.setSpacing(0)
         
         # Top: The video player
-        self.video_widget = QVideoWidget(self)
+        self.video_widget = CustomVideoWidget(self)
+        self.video_widget.setAspectRatioMode(Qt.AspectRatioMode.KeepAspectRatio)
+        self.video_widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         
         # Bottom: The Windows Media Player style control bar
         self.video_controls = QWidget(self)
@@ -61,72 +82,121 @@ class VideoContainer(QWidget):
         self.timeline_layout.addWidget(self.slider_progress)
         self.timeline_layout.addWidget(self.lbl_total_time)
         
-        # --- ROW 2: BUTTONS & TITLE ---
+        # --- ROW 2: BUTTONS ---
         self.buttons_layout = QHBoxLayout()
         
-        self.lbl_title = QLabel("Video Title")
-        self.lbl_title.setStyleSheet("color: white; font-weight: bold; font-size: 14px;")
-        self.lbl_title.setFixedWidth(250) 
+        # Helper function to easily load icons from your assets folder
+        self.asset_dir = main_window.ui.asset_dir
+       
+        def get_icon(name):
+            return QIcon(os.path.join(self.asset_dir, "Svg", f"{name}.svg"))
+
+        # --- Left Side Controls (Volume) ---
+        self.left_controls_layout = QHBoxLayout()
+        self.left_controls_layout.setSpacing(10)
         
-        # --- Center Controls (Skip Back, Play, Skip Forward) ---
+        self.btn_volume = QPushButton()
+        self.btn_volume.setIcon(get_icon("speaker-high"))
+        self.btn_volume.setIconSize(QSize(24, 24))
+        self.btn_volume.setFixedSize(40, 40)
+        self.btn_volume.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_volume.setStyleSheet("background: transparent; border: none; padding: 0px;")
+        
+        self.slider_volume = QSlider(Qt.Orientation.Horizontal)
+        self.slider_volume.setRange(0, 100)
+        self.slider_volume.setValue(100)
+        self.slider_volume.setFixedWidth(80)
+        self.slider_volume.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.slider_volume.setStyleSheet("""
+            QSlider::groove:horizontal { border-radius: 2px; height: 4px; background: #333333; }
+            QSlider::handle:horizontal { background: #ff8c00; width: 12px; height: 12px; margin: -4px 0; border-radius: 6px; }
+            QSlider::sub-page:horizontal { background: #ff8c00; border-radius: 2px; }
+        """)
+        
+        self.left_controls_layout.addWidget(self.btn_volume)
+        self.left_controls_layout.addWidget(self.slider_volume)
+        
+        # --- Center Controls (Previous, Skip Back, Play, Skip Forward, Next) ---
         self.center_controls_layout = QHBoxLayout()
         self.center_controls_layout.setSpacing(15) 
         
-        self.btn_skip_backward = QPushButton("⏪")
+        # Shared style for the transparent SVG buttons
+        icon_button_style = "QPushButton { background-color: transparent; border: none; padding: 0px; margin: 0px; }"
+        
+        self.btn_previous = QPushButton()
+        self.btn_previous.setIcon(get_icon("previous"))
+        self.btn_previous.setIconSize(QSize(24, 24))
+        self.btn_previous.setFixedSize(40, 40)
+        self.btn_previous.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_previous.setStyleSheet(icon_button_style)
+
+        self.btn_skip_backward = QPushButton()
+        self.btn_skip_backward.setIcon(get_icon("back 10Sec"))
+        self.btn_skip_backward.setIconSize(QSize(28, 28))
         self.btn_skip_backward.setFixedSize(40, 40)
         self.btn_skip_backward.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_skip_backward.setStyleSheet(icon_button_style)
         
-        self.btn_play = QPushButton("▶️")
+        self.btn_play = QPushButton()
+        self.btn_play.setIcon(get_icon("play"))
+        self.btn_play.setIconSize(QSize(36, 36)) 
+        self.btn_play.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_play.setFixedSize(48, 48)
         self.btn_play.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_play.setStyleSheet(icon_button_style)
         
-        self.btn_skip_forward = QPushButton("⏩")
+        self.btn_skip_forward = QPushButton()
+        self.btn_skip_forward.setIcon(get_icon("skip 10Sec"))
+        self.btn_skip_forward.setIconSize(QSize(28, 28))
         self.btn_skip_forward.setFixedSize(40, 40)
         self.btn_skip_forward.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_skip_forward.setStyleSheet(icon_button_style)
+
+        self.btn_next = QPushButton()
+        self.btn_next.setIcon(get_icon("next"))
+        self.btn_next.setIconSize(QSize(24, 24))
+        self.btn_next.setFixedSize(40, 40)
+        self.btn_next.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_next.setStyleSheet(icon_button_style)
         
-        # Shared styling for all central buttons
-        button_style = """
-            QPushButton { 
-                background-color: transparent; 
-                border: none; 
-                color: white; 
-                font-size: %s; 
-                text-align: center;
-                padding: 0px;
-                margin: 0px;
-            }
-            QPushButton:hover { color: #ff8c00; }
-        """
-        
-        self.btn_skip_backward.setStyleSheet(button_style % "22px")
-        self.btn_play.setStyleSheet(button_style % "28px") # Slightly larger to be the focal point
-        self.btn_skip_forward.setStyleSheet(button_style % "22px")
-        
+        # Add them in the correct order!
+        self.center_controls_layout.addWidget(self.btn_previous)
         self.center_controls_layout.addWidget(self.btn_skip_backward)
         self.center_controls_layout.addWidget(self.btn_play)
         self.center_controls_layout.addWidget(self.btn_skip_forward)
+        self.center_controls_layout.addWidget(self.btn_next)
         
-        # --- Right Side Controls (Fullscreen) ---
+        # --- Right Side Controls (Loop & Fullscreen) ---
         self.right_controls_container = QWidget()
-        self.right_controls_container.setFixedWidth(250) # Set width on the WIDGET to balance the title
+        self.right_controls_container.setFixedWidth(250)
         
         self.right_controls_layout = QHBoxLayout(self.right_controls_container)
         self.right_controls_layout.setContentsMargins(0, 0, 0, 0)
-        self.right_controls_layout.addStretch() # Push button to the right edge
+        self.right_controls_layout.addStretch() 
         
-        self.btn_fullscreen = QPushButton("⛶")
+        self.btn_loop = QPushButton()
+        self.btn_loop.setIcon(get_icon("repeat-off"))
+        self.btn_loop.setIconSize(QSize(24, 24))
+        self.btn_loop.setFixedSize(40, 40)
+        self.btn_loop.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_loop.setStyleSheet(icon_button_style)
+
+        self.btn_fullscreen = QPushButton()
+        self.btn_fullscreen.setIcon(get_icon("fullscreen"))
+        self.btn_fullscreen.setIconSize(QSize(24, 24))
         self.btn_fullscreen.setFixedSize(40, 40)
         self.btn_fullscreen.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_fullscreen.setStyleSheet(button_style % "20px")
+        self.btn_fullscreen.setStyleSheet(icon_button_style)
         
-        self.right_controls_layout.addWidget(self.btn_fullscreen)
+        self.right_controls_layout.addWidget(self.btn_loop)
+        self.right_controls_layout.addWidget(self.btn_fullscreen)        
         
         # Assemble Row 2
-        self.buttons_layout.addWidget(self.lbl_title, alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.buttons_layout.addLayout(self.left_controls_layout)
         self.buttons_layout.addStretch()
         self.buttons_layout.addLayout(self.center_controls_layout) 
         self.buttons_layout.addStretch()
-        self.buttons_layout.addWidget(self.right_controls_container) # Added the container widget here
+        self.buttons_layout.addWidget(self.right_controls_container) 
         
         self.controls_layout.addLayout(self.timeline_layout)
         self.controls_layout.addLayout(self.buttons_layout)
@@ -134,9 +204,12 @@ class VideoContainer(QWidget):
         self.layout.addWidget(self.video_widget)
         self.layout.addWidget(self.video_controls)
 
+
 class MainWindowUI:
     def setup_ui(self, main_window):
         main_window.resize(1200, 800)
+        
+        self.asset_dir = resource_path("assets")       
         self.central_widget = QWidget()
         main_window.setCentralWidget(self.central_widget)
         
@@ -144,57 +217,63 @@ class MainWindowUI:
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(0)
 
-        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.main_layout.addWidget(self.main_splitter)
+        self.horizontal_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.main_layout.addWidget(self.horizontal_splitter)
 
         self.setup_sidebar()
         self.setup_right_side(main_window)
 
-        self.main_splitter.addWidget(self.sidebar_widget)
-        self.main_splitter.addWidget(self.right_container)
-        self.main_splitter.setSizes([250, 950])
+        self.horizontal_splitter.addWidget(self.sidebar_widget)
+        self.horizontal_splitter.addWidget(self.right_container)
+        self.horizontal_splitter.setSizes([280, 920])
 
     def setup_sidebar(self):
         self.sidebar_widget = QWidget()
         self.sidebar_layout = QVBoxLayout(self.sidebar_widget)
         self.sidebar_layout.setContentsMargins(0, 0, 0, 0)
-        
+
+        # ================= HEADER =================
         self.header_frame = QFrame()
-        self.header_frame.setFixedHeight(70) 
+        self.header_frame.setFixedHeight(80) 
+        
         self.header_layout = QHBoxLayout(self.header_frame)
-        self.header_layout.setContentsMargins(10, 5, 10, 5) 
-        self.header_layout.setSpacing(10) 
-        
-        # --- INVISIBLE SPRING ON THE LEFT ---
+        self.header_layout.setContentsMargins(10, 5, 10, 5)
+        self.header_layout.setSpacing(10)
+        self.header_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
         self.header_layout.addStretch()
+
+        # --- Logo ---
+        self.logo_container = QWidget()
+        self.logo_container.setFixedHeight(80) 
+        self.logo_container.setStyleSheet("background-color: transparent;") 
         
-        # 1. Add the Logo
+        logo_layout = QVBoxLayout(self.logo_container)
+        logo_layout.setContentsMargins(0, 0, 0, 0)
+        
         self.lbl_sidebar_logo = QLabel()
-        logo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "Logo.png"))
-        logo_pixmap = QPixmap(logo_path)
         
+        logo_path = resource_path(os.path.join("assets", "Logo.png"))
+        logo_pixmap = QPixmap(logo_path)
+
         if not logo_pixmap.isNull():
             scaled_logo = logo_pixmap.scaled(
-                240, 70,
+                260, 80, 
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation
             )
             self.lbl_sidebar_logo.setPixmap(scaled_logo)
             self.lbl_sidebar_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.lbl_sidebar_logo.setStyleSheet("""
-                QLabel {
-                    background-color: transparent;
-                    padding: 5px 0px;
-                }
-            """)         
-            self.header_layout.addWidget(self.lbl_sidebar_logo)
+            
+            logo_layout.addWidget(self.lbl_sidebar_logo)
+            self.header_layout.addWidget(self.logo_container)
             self.header_layout.addSpacing(15)
 
-        # 2. Add the Open Folder button
+        # --- Open Folder Button ---
         self.btn_open = QPushButton("OPEN FOLDER")
         self.btn_open.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_open.setFixedHeight(45) 
-        
+        self.btn_open.setFixedHeight(45)
+
         self.btn_open.setStyleSheet("""
             QPushButton {
                 background-color: #007acc;
@@ -208,16 +287,92 @@ class MainWindowUI:
                 background-color: #1890ff;
             }
         """)
-        
+
+        self.btn_load_db = QPushButton(" LOAD DB")
+        self.btn_load_db.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_load_db.setFixedHeight(45) 
+
+        self.btn_load_db.setStyleSheet("""
+            QPushButton {
+                background-color: #238636;
+                color: white;
+                border-radius: 10px; 
+                font-weight: bold;
+                font-size: 14px;     
+                padding: 0px 20px;   
+            }
+            QPushButton:hover { background-color: #2ea043; }
+        """)
+
+        # --- Change DB Folder Button ---
+        self.btn_change_db = QPushButton("⚙️")
+        self.btn_change_db.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_change_db.setFixedSize(45, 45) 
+        self.btn_change_db.setToolTip("Change Database Folder")
+        self.btn_change_db.setStyleSheet("""
+            QPushButton {
+                background-color: #3e3e42;
+                color: white;
+                border-radius: 10px;
+                font-size: 20px;
+                text-align: center;  
+                padding: 0px;        
+                padding-bottom: 2px;  
+            }
+            QPushButton:hover { background-color: #505050; }
+        """)
+
+        # --- Detach Viewer Button ---
+        self.btn_detach = QPushButton("⧉") 
+        self.btn_detach.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_detach.setFixedSize(45, 45)
+        self.btn_detach.setToolTip("Detach Viewer (Multi-Monitor)")
+        self.btn_detach.setStyleSheet("""
+            QPushButton {
+                background-color: #3e3e42;
+                color: white;
+                border-radius: 10px;
+                font-size: 20px;
+            }
+            QPushButton:hover { background-color: #505050; }
+        """)
+
         self.header_layout.addWidget(self.btn_open)
-        
-        # --- INVISIBLE SPRING ON THE RIGHT ---
+        self.header_layout.addWidget(self.btn_load_db)
+        self.header_layout.addWidget(self.btn_change_db)
+        self.header_layout.addWidget(self.btn_detach)
         self.header_layout.addStretch()
 
         self.sidebar_layout.addWidget(self.header_frame)
 
+        # ================= SEARCH BAR =================
+        search_container = QWidget()
+        search_layout = QHBoxLayout(search_container)
+        search_layout.setContentsMargins(10, 5, 10, 10)
+        search_layout.setSpacing(8)
+
+        
+        asset_dir = resource_path("assets")
+
+        # --- Search Icon ---
+        self.search_icon_label = QLabel()
+        search_pixmap = QPixmap(os.path.join(asset_dir, "Svg", "search.svg"))
+
+        if not search_pixmap.isNull():
+            search_pixmap = search_pixmap.scaled(
+                18, 18,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            self.search_icon_label.setPixmap(search_pixmap)
+
+        self.search_icon_label.setFixedWidth(24)
+        self.search_icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # --- Search LineEdit ---
         self.search_bar = QLineEdit()
-        self.search_bar.setPlaceholderText("🔍 Search files, folders, or .ext...")
+        self.search_bar.setPlaceholderText("Search files, folders, or .ext...")
+
         self.search_bar.setStyleSheet("""
             QLineEdit {
                 background-color: #252526;
@@ -225,20 +380,25 @@ class MainWindowUI:
                 border: 1px solid #3e3e42;
                 border-radius: 6px;
                 padding: 8px 12px;
-                margin: 5px 10px 10px 10px; /* Spacing below the header */
                 font-size: 13px;
             }
             QLineEdit:focus {
-                border: 1px solid #007acc; /* Turns blue when clicked */
+                border: 1px solid #007acc;
                 background-color: #2d2d30;
             }
         """)
-        self.sidebar_layout.addWidget(self.search_bar)
 
+        search_layout.addWidget(self.search_icon_label)
+        search_layout.addWidget(self.search_bar)
+
+        self.sidebar_layout.addWidget(search_container)
+
+        # ================= TREE VIEW =================
         self.tree_view = QTreeView()
         self.tree_view.setHeaderHidden(True)
         self.tree_view.setAnimated(True)
         self.tree_view.setIndentation(20)
+
         self.sidebar_layout.addWidget(self.tree_view)
 
     def setup_right_side(self, main_window):
@@ -256,14 +416,91 @@ class MainWindowUI:
         self.lbl_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_placeholder.setStyleSheet("color: #6e6e6e; font-size: 16px;")
         
+        # ==========================================
+        # 🔹 MANHWA VIEWER LAYOUT
+        # ==========================================
+        self.image_view_container = QWidget()
+        self.image_view_layout = QHBoxLayout(self.image_view_container)
+        self.image_view_layout.setContentsMargins(0, 0, 0, 0)
+        self.image_view_layout.setSpacing(2)
+
+        # 1. The Scroll Area (Image Viewer)
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        # We use a container widget so we can swap between the Standard viewer and the Manhwa viewer
+        self.viewer_stack_widget = QWidget()
+        self.viewer_stack_layout = QVBoxLayout(self.viewer_stack_widget)
+        self.viewer_stack_layout.setContentsMargins(0,0,0,0)
+
+        # Standard Viewer (For GIFs and single images)
         self.lbl_image = QLabel()
         self.lbl_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.scroll_area.setWidget(self.lbl_image)
-        self.scroll_area.hide()
+        self.viewer_stack_layout.addWidget(self.lbl_image)
 
+        # High-Performance Virtual Reader (For folders)
+        self.manhwa_reader = ManhwaReaderWidget(self.scroll_area)
+        self.viewer_stack_layout.addWidget(self.manhwa_reader)
+        self.manhwa_reader.hide() # Hidden by default
+
+        self.scroll_area.setWidget(self.viewer_stack_widget)
+
+        # Connect the scrollbar to the virtual reader so it knows when to load images!
+        self.scroll_area.verticalScrollBar().valueChanged.connect(self.manhwa_reader.scroll_update)
+
+        # 2. The Zoom Slider (Hidden until Manhwa loaded)
+        self.manhwa_zoom_slider = QSlider(Qt.Orientation.Vertical)
+        self.manhwa_zoom_slider.setRange(50, 200) 
+        self.manhwa_zoom_slider.setValue(100)     
+        self.manhwa_zoom_slider.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.manhwa_zoom_slider.setStyleSheet("""
+            QSlider::groove:vertical { border-radius: 2px; width: 6px; background: #333333; }
+            QSlider::handle:vertical { background: #0e639c; height: 16px; width: 16px; margin: 0 -5px; border-radius: 8px; }
+            QSlider::sub-page:vertical { background: #333333; border-radius: 2px; }
+            QSlider::add-page:vertical { background: #0e639c; border-radius: 2px; }
+        """)
+        self.manhwa_zoom_slider.hide()
+
+        # 3. The Custom External Scrollbar
+        self.main_scrollbar = QScrollBar(Qt.Orientation.Vertical)
+        self.main_scrollbar.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.main_scrollbar.setStyleSheet("""
+            QScrollBar:vertical { background: #1e1e1e; width: 14px; margin: 0px; border-left: 1px solid #333333; }
+            QScrollBar::handle:vertical { background: #424242; min-height: 20px; border-radius: 6px; margin: 2px; }
+            QScrollBar::handle:vertical:hover { background: #4f4f4f; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+        """)
+
+        # Sync the hidden native scrollbar with our custom one
+        real_sb = self.scroll_area.verticalScrollBar()
+        real_sb.rangeChanged.connect(self.main_scrollbar.setRange)
+        real_sb.valueChanged.connect(self.main_scrollbar.setValue)
+        self.main_scrollbar.valueChanged.connect(real_sb.setValue)
+        
+        # Hide the custom scrollbar when it's not needed (just like native behavior)
+        def sync_scroll_state(min_val, max_val):
+            self.main_scrollbar.setPageStep(real_sb.pageStep())
+            self.main_scrollbar.setSingleStep(real_sb.singleStep())
+            if max_val <= 0:
+                self.main_scrollbar.hide()
+            else:
+                self.main_scrollbar.show()
+                
+        real_sb.rangeChanged.connect(sync_scroll_state)
+
+        # 🔹 ADD WIDGETS IN THE EXACT ORDER REQUESTED:
+        self.image_view_layout.addWidget(self.scroll_area)        # Left: Image
+        self.image_view_layout.addWidget(self.manhwa_zoom_slider) # Middle: Zoom Slider
+        self.image_view_layout.addWidget(self.main_scrollbar)     # Right: Custom Scrollbar
+
+        self.image_view_container.hide() 
+
+        # ==========================================
+        # VIDEO CONTAINER SETUP
+        # ==========================================
         self.video_container = VideoContainer(main_window)
         
         self.video_widget = self.video_container.video_widget
@@ -271,16 +508,20 @@ class MainWindowUI:
         self.btn_play = self.video_container.btn_play
         self.btn_skip_backward = self.video_container.btn_skip_backward
         self.btn_skip_forward = self.video_container.btn_skip_forward
+        self.btn_previous = self.video_container.btn_previous   
+        self.btn_next = self.video_container.btn_next                 
         self.btn_fullscreen = self.video_container.btn_fullscreen       
+        self.btn_loop = self.video_container.btn_loop               
+        self.btn_volume = self.video_container.btn_volume           
+        self.slider_volume = self.video_container.slider_volume     
         self.slider_progress = self.video_container.slider_progress
         self.lbl_current_time = self.video_container.lbl_current_time
         self.lbl_total_time = self.video_container.lbl_total_time
-        self.lbl_title = self.video_container.lbl_title
 
         self.video_container.hide()
 
         self.viewer_layout.addWidget(self.lbl_placeholder)
-        self.viewer_layout.addWidget(self.scroll_area)
+        self.viewer_layout.addWidget(self.image_view_container)
         self.viewer_layout.addWidget(self.video_container)
 
         self.gallery_section = GallerySection()
@@ -288,3 +529,6 @@ class MainWindowUI:
         self.vertical_splitter.addWidget(self.gallery_section)
         self.vertical_splitter.setSizes([600, 200])
         self.right_layout.addWidget(self.vertical_splitter)
+
+    def svg_path(self, name):
+        return os.path.join(self.asset_dir, "Svg", f"{name}.svg")

@@ -1,3 +1,4 @@
+import os
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -9,7 +10,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QIcon
 
 
 class GallerySection(QWidget):
@@ -22,8 +23,14 @@ class GallerySection(QWidget):
     def __init__(self):
         super().__init__()
 
+        # --- Size Mode State ---
         self.current_mode = "large"
         self.TILE_WIDTH, self.TILE_HEIGHT, self.ICON_SIZE = self.LARGE
+
+        # --- Asset Path ---
+        from Src.Logic.paths import resource_path
+        self.asset_dir = resource_path("assets")
+        self.svg_dir = os.path.join(self.asset_dir, "Svg")
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
@@ -40,18 +47,14 @@ class GallerySection(QWidget):
             font-weight: bold;
         """)
 
-        # Light square symbols for better visibility
-        self.btn_size_toggle = QPushButton("⬜")  # Large default
-        self.btn_size_toggle.setFixedSize(42, 30)
+        # --- SVG Size Toggle Button ---
+        self.btn_size_toggle = QPushButton()
+        self.btn_size_toggle.setFixedSize(42, 32)
         self.btn_size_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        font = QFont("Segoe UI Symbol", 14)
-        self.btn_size_toggle.setFont(font)
 
         self.btn_size_toggle.setStyleSheet("""
             QPushButton {
                 background-color: #2d2d30;
-                color: #ffffff;
                 border-radius: 6px;
                 border: 1px solid #3e3e42;
                 padding: 0px;
@@ -61,6 +64,14 @@ class GallerySection(QWidget):
                 background-color: #3a3a3d;
             }
         """)
+
+        # Default icon = large
+        self.btn_size_toggle.setIcon(QIcon(os.path.join(self.svg_dir, "large.svg"))
+        
+        )
+        
+        self.btn_size_toggle.setIconSize(QSize(20, 20))
+        self.btn_size_toggle.setContentsMargins(0, 0, 0, 0)
 
         header_layout.addWidget(self.lbl_header)
         header_layout.addStretch()
@@ -120,17 +131,23 @@ class GallerySection(QWidget):
         if self.current_mode == "large":
             self.current_mode = "medium"
             width, height, icon = self.MEDIUM
-            self.btn_size_toggle.setText("◻")
+            self.btn_size_toggle.setIcon(
+                QIcon(os.path.join(self.svg_dir, "medium.svg"))
+            )
 
         elif self.current_mode == "medium":
             self.current_mode = "small"
             width, height, icon = self.SMALL
-            self.btn_size_toggle.setText("▫")
+            self.btn_size_toggle.setIcon(
+                QIcon(os.path.join(self.svg_dir, "small.svg"))
+            )
 
         else:
             self.current_mode = "large"
             width, height, icon = self.LARGE
-            self.btn_size_toggle.setText("⬜")
+            self.btn_size_toggle.setIcon(
+                QIcon(os.path.join(self.svg_dir, "large.svg"))
+            )
 
         self.TILE_WIDTH = width
         self.TILE_HEIGHT = height
@@ -151,7 +168,9 @@ class GallerySection(QWidget):
             item = QListWidgetItem(name)
             item.setData(Qt.ItemDataRole.UserRole, path)
             item.setSizeHint(QSize(self.TILE_WIDTH, self.TILE_HEIGHT))
-            item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
+            item.setTextAlignment(
+                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom
+            )
             item.setToolTip(name)
 
             if is_video:
@@ -165,3 +184,35 @@ class GallerySection(QWidget):
     def on_item_clicked(self, item):
         path = item.data(Qt.ItemDataRole.UserRole)
         self.file_selected.emit(path)
+
+    def set_size_mode(self, target_mode):
+        """Forces the gallery into small, medium, or large mode."""
+        self.current_mode = target_mode
+        
+        if target_mode == "small":
+            width, height, icon = self.SMALL
+            icon_name = "small.svg"
+        elif target_mode == "medium":
+            width, height, icon = self.MEDIUM
+            icon_name = "medium.svg"
+        else:
+            width, height, icon = self.LARGE
+            icon_name = "large.svg"
+
+        # Update the button icon if it exists
+        if hasattr(self, 'btn_size_toggle'):
+            self.btn_size_toggle.setIcon(QIcon(os.path.join(self.svg_dir, icon_name)))
+
+        # Update core size variables
+        self.TILE_WIDTH = width
+        self.TILE_HEIGHT = height
+        self.ICON_SIZE = icon
+
+        # Apply to the Grid
+        self.list_widget.setIconSize(QSize(icon, icon))
+        self.list_widget.setGridSize(QSize(width, height))
+
+        # Resize all existing items instantly
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            item.setSizeHint(QSize(width, height))
