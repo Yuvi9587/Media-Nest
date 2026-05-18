@@ -1,12 +1,24 @@
 <div align="center">
 
+<table>
+<tr>
+<td width="180" align="center">
+
 <img src="assets/Logo 1.png" width="140" height="140" alt="Media Nest Logo" />
 
-# Media Nest
+</td>
+
+<td align="left">
+
+<h1>Media Nest</h1>
 
 <p>
 Media Nest is a desktop application made for browsing, organizing, tagging, and managing large media collections. It combines a file browser, database-powered search system, media player, thumbnail gallery, and tagging workspace into a single interface designed for fast navigation and large libraries.
 </p>
+
+</td>
+</tr>
+</table>
 
 </div>
 
