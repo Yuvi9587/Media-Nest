@@ -142,7 +142,7 @@ class FirstTimeSetupDialog(QDialog):
         library_db_path = os.path.join(target_folder, "library.db")
         
         if os.path.exists(library_db_path):
-            # 🔹 NEW: Update button text and check for character.db!
+            # 🔹 Update button text and check for character.db!
             self.btn_link_kemono.setText("⏳ Verifying and downloading assets...")
             self.btn_link_kemono.setEnabled(False)
             QApplication.processEvents() # Force UI to update
@@ -188,7 +188,7 @@ class FirstTimeSetupDialog(QDialog):
             conn.commit()
             conn.close()
             
-            # 🔹 NEW: Download the character.db directly into this new folder!
+            # 🔹Download the character.db directly into this new folder!
             self.download_character_db(new_workspace)
             
             self.save_and_exit(new_workspace, is_new=True)

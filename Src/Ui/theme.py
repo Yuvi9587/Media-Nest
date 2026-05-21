@@ -37,7 +37,7 @@ QPushButton:hover { background-color: #1177bb; }
 QScrollArea { border: none; background-color: #1e1e1e; }
 QLabel { background-color: #1e1e1e; }
 
-/* --- NEW: Splitter Handles (The draggable dividers) --- */
+/* --- Splitter Handles (The draggable dividers) --- */
 QSplitter::handle {
     background-color: #181818; 
 }

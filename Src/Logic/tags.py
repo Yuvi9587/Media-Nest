@@ -11,48 +11,254 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QFileDialog, QMessageBox, QCompleter, QListWidgetItem,
                              QSplitter, QSizePolicy, QApplication, QDialog, 
                              QProgressBar, QRadioButton, QButtonGroup, QCheckBox,
-                             QPlainTextEdit)
-from PyQt6.QtCore import Qt, QStringListModel, QThread, pyqtSignal, QSize
-from PyQt6.QtGui import QPixmap, QImageReader
+                             QPlainTextEdit, QStackedWidget, QSlider)
+from PyQt6.QtCore import Qt, QStringListModel, QThread, pyqtSignal, QSize, QUrl
+from PyQt6.QtGui import QPixmap, QImageReader, QMovie, QIcon
+from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PyQt6.QtMultimediaWidgets import QVideoWidget
 
 # =========================================================
-# 🖼️ RESPONSIVE IMAGE LABEL
+# 🖼️ RESPONSIVE IMAGE & GIF LABEL
 # =========================================================
 class ResponsiveImageLabel(QLabel):
-    """A smart label that dynamically resizes its image to fit any screen without breaking the layout."""
+    """A smart label that dynamically resizes images AND GIFs to fit any screen."""
     def __init__(self, text=""):
         super().__init__(text)
-        self.setMinimumSize(100, 100) # This allows the window to shrink!
+        self.setMinimumSize(100, 100) 
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setStyleSheet("background-color: #151515; border: 1px solid #454545; border-radius: 6px; padding: 5px;")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._pixmap = None
+        self._movie = None
 
     def set_image(self, file_path):
-        reader = QImageReader(file_path)
-        orig_size = reader.size()
-        if orig_size.isValid():
-            reader.setScaledSize(orig_size.scaled(1920, 1080, Qt.AspectRatioMode.KeepAspectRatio))
+        self.clear_image("")
+        ext = os.path.splitext(file_path)[1].lower()
+        
+        # natively handle animated GIFs
+        if ext == '.gif':
+            self._movie = QMovie(file_path)
+            self.setMovie(self._movie)
+            self._movie.start()
+            self._scale_movie() 
+        else:
+            reader = QImageReader(file_path)
+            reader.setAutoTransform(True)
             img = reader.read()
             if not img.isNull():
                 self._pixmap = QPixmap.fromImage(img)
-                self.update_image()
+                self.update_image_display()
 
-    def clear_image(self, text):
+    def clear_image(self, text=""):
+        if self._movie:
+            self._movie.stop()
+            self.setMovie(None)
+            self._movie = None
         self._pixmap = None
-        self.clear()
         self.setText(text)
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if self._pixmap:
-            self.update_image()
+    def update_image_display(self):
+        if self._pixmap and not self._pixmap.isNull():
+            scaled_pixmap = self._pixmap.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.setPixmap(scaled_pixmap)
 
-    def update_image(self):
+    def _scale_movie(self):
+        if self._movie and self._movie.isValid():
+            orig_size = self._movie.currentImage().size()
+            if not orig_size.isEmpty():
+                scaled_size = orig_size.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio)
+                self._movie.setScaledSize(scaled_size)
+
+    def resizeEvent(self, event):
         if self._pixmap:
-            target_size = self.size() - QSize(12, 12) 
-            scaled = self._pixmap.scaled(target_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            super().setPixmap(scaled)
+            self.update_image_display()
+        elif self._movie:
+            self._scale_movie()
+        super().resizeEvent(event)
+
+# =========================================================
+# 🎚️ SAFE JUMP SLIDER (Prevents Seeking Freezes)
+# =========================================================
+class SafeJumpSlider(QSlider):
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            # Calculate where the user clicked on the bar
+            val = self.minimum() + ((self.maximum() - self.minimum()) * event.position().x()) / self.width()
+            self.setValue(int(val))
+            # Emit the move signal so our media player catches it
+            self.sliderMoved.emit(int(val))
+            event.accept()
+        super().mousePressEvent(event)
+
+# =========================================================
+# 🎬 UNIVERSAL MEDIA VIEWER (Wraps Image/GIF/Video seamlessly)
+# =========================================================
+class UniversalMediaViewer(QWidget):
+    def __init__(self, default_text="Select a file from the Inbox to work on", parent=None):
+        super().__init__(parent)
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.stack = QStackedWidget()
+        self.layout.addWidget(self.stack)
+        
+        # --- Index 0: Image & GIF Player ---
+        self.image_label = ResponsiveImageLabel(default_text)
+        self.stack.addWidget(self.image_label)
+        
+        # --- Index 1: Video Player + Controls ---
+        self.video_container = QWidget()
+        self.video_layout = QVBoxLayout(self.video_container)
+        self.video_layout.setContentsMargins(0, 0, 0, 0)
+        self.video_layout.setSpacing(5)
+        
+        self.video_widget = QVideoWidget()
+        self.video_layout.addWidget(self.video_widget, stretch=1)
+        
+        # --- Build the Timeline (Scrubber) ---
+        self.timeline_layout = QHBoxLayout()
+        self.lbl_current_time = QLabel("00:00")
+        self.lbl_total_time = QLabel("00:00")
+        
+        for lbl in [self.lbl_current_time, self.lbl_total_time]:
+            lbl.setStyleSheet("color: #cccccc; font-size: 11px; font-weight: bold;")
+            
+        self.slider_progress = SafeJumpSlider(Qt.Orientation.Horizontal)
+        self.slider_progress.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.slider_progress.setStyleSheet("""
+            QSlider::groove:horizontal { height: 6px; background: #3e3e42; border-radius: 3px; }
+            QSlider::sub-page:horizontal { background: #007acc; border-radius: 3px; }
+            QSlider::handle:horizontal { background: white; width: 12px; margin: -3px 0; border-radius: 6px; }
+        """)
+        
+        self.timeline_layout.addWidget(self.lbl_current_time)
+        self.timeline_layout.addWidget(self.slider_progress)
+        self.timeline_layout.addWidget(self.lbl_total_time)
+        self.video_layout.addLayout(self.timeline_layout)
+
+        # --- Build the custom control bar ---
+        self.controls_layout = QHBoxLayout()
+        self.controls_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.btn_skip_back = QPushButton(" -10s")
+        self.btn_play_pause = QPushButton(" Pause")
+        self.btn_skip_forward = QPushButton(" +10s")
+
+        for btn in [self.btn_skip_back, self.btn_play_pause, self.btn_skip_forward]:
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet("""
+                QPushButton {
+                    padding: 5px 15px; 
+                    background-color: #252526; 
+                    color: white; 
+                    border: 1px solid #3e3e42; 
+                    border-radius: 4px;
+                }
+                QPushButton:hover { background-color: #3e3e42; }
+            """)
+            self.controls_layout.addWidget(btn)
+            
+        self.video_layout.addLayout(self.controls_layout)
+        self.stack.addWidget(self.video_container)
+
+        # --- Media Player Setup ---
+        self.media_player = QMediaPlayer()
+        self.audio_output = QAudioOutput()
+        self.audio_output.setVolume(0.5) 
+        self.media_player.setAudioOutput(self.audio_output)
+        self.media_player.setVideoOutput(self.video_widget)
+        
+        # --- Wiring Up the Signals ---
+        self.media_player.mediaStatusChanged.connect(self._check_loop)
+        self.media_player.playbackStateChanged.connect(self._update_play_button)
+        self.media_player.positionChanged.connect(self._update_position)
+        self.media_player.durationChanged.connect(self._update_duration)
+        
+        self.slider_progress.sliderMoved.connect(self._set_position)
+        
+        self.btn_play_pause.clicked.connect(self.toggle_play_pause)
+        self.btn_skip_back.clicked.connect(lambda: self.skip(-10000))
+        self.btn_skip_forward.clicked.connect(lambda: self.skip(10000))
+
+    # --- Video Control & Timeline Logic ---
+    def _format_time(self, ms):
+        """Converts milliseconds into MM:SS or HH:MM:SS format"""
+        s = round(ms / 1000)
+        m, s = divmod(s, 60)
+        h, m = divmod(m, 60)
+        if h > 0:
+            return f"{h}:{m:02}:{s:02}"
+        return f"{m:02}:{s:02}"
+
+    def _update_position(self, position):
+        # Only update the slider if the user isn't currently dragging it
+        if not self.slider_progress.isSliderDown():
+            self.slider_progress.setValue(position)
+        self.lbl_current_time.setText(self._format_time(position))
+
+    def _update_duration(self, duration):
+        self.slider_progress.setRange(0, duration)
+        self.lbl_total_time.setText(self._format_time(duration))
+
+    def _set_position(self, position):
+        """Safely seeks by temporarily pausing the video to free up the decoder."""
+        # 1. Check if the video is currently playing
+        was_playing = self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+        
+        # 2. Pause the player to prevent the decoder from locking up
+        if was_playing:
+            self.media_player.pause()
+            
+        # 3. Safely jump to the new timestamp
+        self.media_player.setPosition(position)
+        
+        # 4. Instantly resume playing if it was playing before the click
+        if was_playing:
+            self.media_player.play()
+
+    def _check_loop(self, status):
+        if status == QMediaPlayer.MediaStatus.EndOfMedia:
+            self.media_player.setPosition(0)
+            self.media_player.play()
+
+    def toggle_play_pause(self):
+        if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.media_player.pause()
+        else:
+            self.media_player.play()
+
+    def _update_play_button(self, state):
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            self.btn_play_pause.setText(" Pause")
+        else:
+            self.btn_play_pause.setText(" Play")
+
+    def skip(self, ms):
+        """Skip buttons now use the freeze-proof safe seek."""
+        new_pos = self.media_player.position() + ms
+        max_pos = self.media_player.duration()
+        new_pos = max(0, min(new_pos, max_pos)) 
+        self._set_position(new_pos)
+
+    # --- Routing Logic ---
+    def set_image(self, file_path):
+        self.clear_image("") 
+        ext = os.path.splitext(file_path)[1].lower()
+        video_exts = {'.mp4', '.webm', '.mkv', '.mov', '.avi'}
+        
+        if ext in video_exts:
+            self.stack.setCurrentIndex(1)
+            self.media_player.setSource(QUrl.fromLocalFile(file_path))
+            self.media_player.play()
+        else:
+            self.stack.setCurrentIndex(0)
+            self.image_label.set_image(file_path)
+
+    def clear_image(self, text="Select a file from the Inbox to work on"):
+        self.media_player.stop()
+        self.media_player.setSource(QUrl()) 
+        self.stack.setCurrentIndex(0)
+        self.image_label.clear_image(text)
 
 # =========================================================
 # ☁️ CLOUD SYNC THREAD
@@ -191,7 +397,7 @@ class ImportFolderThread(QThread):
                     else:
                         file_name = os.path.basename(file_path)
                         
-                        # 🔹 NEW: Calculate Perceptual Hash (phash) for Images!
+                        # 🔹 Calculate Perceptual Hash (phash) for Images!
                         phash_value = None
                         if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif')):
                             try:
@@ -437,7 +643,7 @@ class TagManagerTab(QWidget):
         workspace_group = QGroupBox("Media Workspace")
         workspace_layout = QVBoxLayout()
 
-        self.lbl_tag_preview = ResponsiveImageLabel("Select a file from the Inbox to work on")
+        self.lbl_tag_preview = UniversalMediaViewer("Select a file from the Inbox to work on")
         workspace_layout.addWidget(self.lbl_tag_preview, stretch=7)
         
         self.console = QPlainTextEdit()

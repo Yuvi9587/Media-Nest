@@ -97,7 +97,7 @@ class SettingsDialog(QDialog):
         self.auto_delete_mode = "safe" 
         
         self.thumb_labels_map = {} 
-        self.nav_groups = [] # 👈 NEW: 2D Grid map for Arrow Key Navigation
+        self.nav_groups = [] # 👈 2D Grid map for Arrow Key Navigation
 
         self.scale_map = {
             "50%": "0.5", "70%": "0.7", "90%": "0.9", "100% (Default)": "1.0",
@@ -113,7 +113,7 @@ class SettingsDialog(QDialog):
         
         self.current_strictness = 0 
         
-        # 1. 🔹 NEW: Always grab the official database folder from the OS Registry first!
+        # 1. 🔹 Always grab the official database folder from the OS Registry first!
         settings = QSettings("MediaNest", "AppConfig")
         self.current_db_folder = settings.value("db_folder_path", "", type=str)
 
@@ -357,9 +357,7 @@ class SettingsDialog(QDialog):
         else: text = f"Loose ({val} diffs allowed)"
         self.lbl_strictness.setText(f"Strictness: {text}")
 
-    # ==========================================
-    # 🔹 NEW: KEYBOARD NAVIGATION INTERCEPTOR
-    # ==========================================
+    # 🔹 KEYBOARD NAVIGATION INTERCEPTOR
     def keyPressEvent(self, event):
         """Intercepts Arrow Keys to navigate the duplicate grid instantly without lag."""
         # Only hijack arrow keys if we are on the Deduplication tab and have a widget focused
@@ -701,7 +699,7 @@ class SettingsDialog(QDialog):
             self.lbl_dedupe_status.setText(f"Done! Displaying {self.total_render_items} duplicate groups.")
             self.pb_dedupe.setVisible(False)
             
-            # --- NEW: Auto-load the first visible group! ---
+            # --- Auto-load the first visible group! ---
             self.on_dedupe_scroll(self.dedupe_scroll.verticalScrollBar().value())
             return
 
@@ -734,7 +732,7 @@ class SettingsDialog(QDialog):
         btn_ignore.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_ignore.setStyleSheet("QPushButton { background-color: transparent; border: 1px solid #3fb950; color: #3fb950; padding: 4px 10px; border-radius: 4px; font-weight: bold; } QPushButton:hover { background-color: rgba(63, 185, 80, 0.1); }")
         
-        # --- NEW: Delete All Button ---
+        # --- Delete All Button ---
         btn_delete_all = QPushButton("🗑️ Delete All")
         btn_delete_all.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_delete_all.setStyleSheet("QPushButton { background-color: transparent; border: 1px solid #a31515; color: #a31515; padding: 4px 10px; border-radius: 4px; font-weight: bold; } QPushButton:hover { background-color: rgba(163, 21, 21, 0.1); }")
@@ -756,7 +754,7 @@ class SettingsDialog(QDialog):
         has_checkboxes = len(group_items) >= 3
         checkbox_refs = [] 
         
-        # 🔹 NEW: Array to collect the images for this specific row
+        # 🔹Array to collect the images for this specific row
         nav_group_row = [] 
         
         for item in group_items:
@@ -811,7 +809,7 @@ class SettingsDialog(QDialog):
             item_layout.addWidget(btn_del)
             group_images_layout.addWidget(item_widget)
 
-        # 🔹 NEW: Add this group's images to the global navigation map
+        # 🔹Add this group's images to the global navigation map
         if nav_group_row:
             self.nav_groups.append(nav_group_row)
 
@@ -863,7 +861,7 @@ class SettingsDialog(QDialog):
         conn.commit()
         conn.close()
         
-        # --- 🔹 NEW: Purge the group from active memory! ---
+        # --- 🔹 Purge the group from active memory! ---
         if group_data in self.current_duplicate_groups:
             self.current_duplicate_groups.remove(group_data)
         # ---------------------------------------------------

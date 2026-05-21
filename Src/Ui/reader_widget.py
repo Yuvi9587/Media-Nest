@@ -62,7 +62,7 @@ class ManhwaReaderWidget(QWidget):
         self.signals = LoaderSignals()
         self.signals.loaded.connect(self.on_image_loaded)
         
-        # --- NEW ZOOM VARIABLES ---
+        # --- ZOOM VARIABLES ---
         self.zoom_factor = 1.0
         self.viewport_width = 1000
         self.current_target_width = 1000

@@ -70,7 +70,7 @@ class VideoThumbnailer(QObject):
         QTimer.singleShot(30, self.player.play)
         self.timeout_timer.start(3000)
 
-    # 🔹 NEW PAUSE/RESUME LOGIC 🔹
+    # 🔹 PAUSE/RESUME LOGIC 🔹
     def pause(self):
         self.is_paused = True
         if self.is_processing:
@@ -391,9 +391,6 @@ class MultiTagCompleter(QCompleter):
         self.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.setFilterMode(Qt.MatchFlag.MatchContains) 
 
-    # ==========================================
-    # 🔹 NEW: SCALING BUG FIX 
-    # ==========================================
     def showPopup(self):
         # 1. Let PyQt generate the popup normally first
         super().showPopup()
@@ -765,7 +762,6 @@ class MediaExplorerApp(QMainWindow):
         self.ui.btn_previous.clicked.connect(self.play_previous)
         self.ui.btn_next.clicked.connect(self.play_next)
 
-    # --- NEW PLAYER LOGIC METHODS (SVG Integration) ---
     def toggle_loop(self):
         self.is_video_looping = not self.is_video_looping
 
@@ -962,7 +958,7 @@ class MediaExplorerApp(QMainWindow):
         index = self.ui.tree_view.indexAt(position)
         
         if index.isValid():
-            # 🔹 Block signals here too
+            #  Block signals here too
             self.ui.tree_view.blockSignals(True)
             self.ui.tree_view.setCurrentIndex(index)
             self.ui.tree_view.blockSignals(False)
@@ -971,7 +967,7 @@ class MediaExplorerApp(QMainWindow):
             selected_path = str(item.data(Qt.ItemDataRole.UserRole))
             is_folder = item.data(Qt.ItemDataRole.UserRole + 2)
             
-            # 🔹 NEW: Tell the context menu this is a locked virtual folder
+            # : Tell the context menu this is a locked virtual folder
             if selected_path.startswith("VIRTUAL_"):
                 target_folder = "VIRTUAL_BLOCK"
             else:
@@ -985,7 +981,7 @@ class MediaExplorerApp(QMainWindow):
 
     def get_active_target_folder(self):
         """Determines where a paste operation should go based on UI focus."""
-        # 🔹 NEW: Block paste if a Database Search is currently active
+        # 🔹 Block paste if a Database Search is currently active
         if getattr(self, 'db_connection', None) and self.ui.search_bar.text().strip():
             return "VIRTUAL_BLOCK"
 
@@ -997,7 +993,7 @@ class MediaExplorerApp(QMainWindow):
                     # Ensure path is a string to prevent errors
                     path = str(item.data(Qt.ItemDataRole.UserRole))
                     
-                    # 🔹 NEW: Block paste if right-clicking a virtual search result
+                    # 🔹 Block paste if right-clicking a virtual search result
                     if path.startswith("VIRTUAL_"):
                         return "VIRTUAL_BLOCK"
                         
@@ -1031,7 +1027,7 @@ class MediaExplorerApp(QMainWindow):
     def shortcut_paste(self):
         target = self.get_active_target_folder()
         
-        # 🔹 NEW: Show a warning if they try to use Ctrl+V in search results
+        # 🔹 Show a warning if they try to use Ctrl+V in search results
         if target == "VIRTUAL_BLOCK":
             QMessageBox.information(self, "Action Blocked", "You cannot paste files into a database search result.\n\nPlease clear the search or select a real folder first.")
             return
