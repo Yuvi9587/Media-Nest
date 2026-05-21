@@ -34,6 +34,13 @@ Media Nest was created for users who manage large collections of images, videos,
 The application is designed to keep media collections easy to browse even when libraries become extremely large. Instead of navigating thousands of files manually through Windows Explorer, Media Nest organizes everything into searchable trees, thumbnail galleries, and media workspaces that make navigation significantly faster and cleaner.
 </p>
 
+<br>
+<div align="center">
+  <img src="assets/1.png" alt="Media Nest Main Interface" width="100%" />
+  <p><i>The main Media Nest gallery and universal media player.</i></p>
+</div>
+<br>
+
 ---
 
 <h2>Main Toolbar</h2>
@@ -260,6 +267,13 @@ The section also contains tools for deleting selected tags when unwanted metadat
 </p>
 
 <h3>Media Workspace</h3>
+
+<br>
+<div align="center">
+  <img src="assets/2.png" alt="Media Nest Tagging Workspace" width="100%" />
+  <p><i>The Tagging Workspace, showing the AI suggestions and Cloud match UI.</i></p>
+</div>
+<br>
 
 <p>
 The Media Workspace displays a live preview of the currently selected file from the Tagless Inbox Queue. This allows users to visually inspect media while adding or editing tags.
