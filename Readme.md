@@ -1,75 +1,216 @@
-# Media-Nest
+<h1>
+  Media-Nest
+  <img src="assets/Logo%201.png"
+       width="130"
+       align="right"
+       alt="Media-Nest Logo"
+       style="margin-top:-25px;">
+</h1>
 
-<img src="assets/Logo%201.png" width="250" align="right" alt="Media-Nest Logo" style="margin-top:-40px;">
+<hr>
 
-Media-Nest is a high-performance desktop application designed for organizing, viewing, and managing extensive local image and video libraries. It focuses heavily on performance, leveraging multithreading and background processing to ensure the user interface remains responsive even when dealing with thousands of files. 
+<p>
+Media-Nest is a high-performance desktop application designed for organizing, viewing, and managing extensive local image and video libraries. It focuses heavily on performance, leveraging multithreading and background processing to ensure the user interface remains responsive even when dealing with thousands of files.
+</p>
 
-![Main Interface](assets/1.png)
+<p align="center">
+  <img src="assets/1.png" alt="Main Interface" width="100%">
+</p>
 
-## Core Features and Capabilities
+<h2>Core Features and Capabilities</h2>
 
+<p>
 The application offers a variety of advanced features to help you manage your media library efficiently. The user interface is designed with a premium, dark-themed aesthetic inspired by modern professional IDEs, minimizing eye strain during extended organizing sessions.
+</p>
 
-**Intelligent Media Organization**
-Navigating through your media is streamlined by a smart tree navigation system that lets you effortlessly browse folders and galleries. 
-*   **Multi-Tag Search**: A highly intelligent search bar allows you to quickly filter your entire library by combining inclusive and exclusive tags. For example, you can search for a specific character while explicitly excluding another.
+<h3>Intelligent Media Organization</h3>
 
-**Advanced Duplicate Detection**
+<p>
+Navigating through your media is streamlined by a smart tree navigation system that lets you effortlessly browse folders and galleries.
+</p>
+
+<ul>
+  <li>
+    <strong>Multi-Tag Search:</strong>
+    A highly intelligent search bar allows you to quickly filter your entire library by combining inclusive and exclusive tags. For example, you can search for a specific character while explicitly excluding another.
+  </li>
+</ul>
+
+<h3>Advanced Duplicate Detection</h3>
+
+<p>
 When it comes to managing duplicate content, Media-Nest offers robust tools to help you reclaim valuable storage space.
-*   **Image Deduplication**: Utilizes perceptual hashing (pHash) algorithms to cluster and identify visually similar or exact duplicate images.
-*   **Video Deduplication**: Integrates with a powerful backend CLI engine, utilizing FFmpeg and a specialized Video Duplicate Finder engine to scan your video library for exact matches.
+</p>
 
-![Media Viewer](assets/2.png)
+<ul>
+  <li>
+    <strong>Image Deduplication:</strong>
+    Utilizes perceptual hashing (pHash) algorithms to cluster and identify visually similar or exact duplicate images.
+  </li>
 
-**AI-Powered Auto-Tagging**
+  <li>
+    <strong>Video Deduplication:</strong>
+    Integrates with a powerful backend CLI engine, utilizing FFmpeg and a specialized Video Duplicate Finder engine to scan your video library for exact matches.
+  </li>
+</ul>
+
+<p align="center">
+  <img src="assets/2.png" alt="Media Viewer" width="100%">
+</p>
+
+<h3>AI-Powered Auto-Tagging</h3>
+
+<p>
 To drastically reduce the manual labor involved in organizing a large collection, Media-Nest includes an AI-powered auto-tagging system accessible through the tag manager.
-*   **Hardware Acceleration**: Leverages the ONNX runtime, supporting CPU, NVIDIA CUDA, and DirectML execution providers to run efficiently on your specific hardware.
-*   **Smart Predictions**: Analyzes images and video frames to automatically predict characters and apply tags, using a customizable fallback rule system based on visual traits like hair and eye color.
+</p>
 
-**High-Performance Viewers**
+<ul>
+  <li>
+    <strong>Hardware Acceleration:</strong>
+    Leverages the ONNX runtime, supporting CPU, NVIDIA CUDA, and DirectML execution providers to run efficiently on your specific hardware.
+  </li>
+
+  <li>
+    <strong>Smart Predictions:</strong>
+    Analyzes images and video frames to automatically predict characters and apply tags, using a customizable fallback rule system based on visual traits like hair and eye color.
+  </li>
+</ul>
+
+<h3>High-Performance Viewers</h3>
+
+<p>
 Media-Nest excels in media playback and viewing, providing specialized tools for different types of content.
-*   **Video Player**: Features custom timeline controls, volume sliders, looping functionality, and a detached viewer mode that is perfect for multi-monitor setups.
-*   **Comic Readers**: Provides specialized virtual readers capable of handling infinite vertical scrolling (ideal for manhwa) as well as classic paginated reading for manga.
+</p>
 
-## System Workflow and Usage
+<ul>
+  <li>
+    <strong>Video Player:</strong>
+    Features custom timeline controls, volume sliders, looping functionality, and a detached viewer mode that is perfect for multi-monitor setups.
+  </li>
 
+  <li>
+    <strong>Comic Readers:</strong>
+    Provides specialized virtual readers capable of handling infinite vertical scrolling (ideal for manhwa) as well as classic paginated reading for manga.
+  </li>
+</ul>
+
+<h2>System Workflow and Usage</h2>
+
+<p>
 Managing your media library is a straightforward process designed to be seamless and non-blocking. A swarm of background worker threads handles resource-intensive tasks without freezing the main user interface.
+</p>
 
-*   **Initialization**: Point the application to your media library or load an existing SQLite database containing your tags and metadata.
-*   **Background Processing**: The application asynchronously scans your directories, generating thumbnails and extracting video frames in the background.
-*   **Navigation**: Use the sidebar search to find specific tags. The application will instantly query the database to update the main view with relevant files or galleries.
-*   **Viewing**: Click an image to open it in the native viewer (double-click to zoom and pan), click a video to play it instantly, or open a folder of images to trigger the high-performance comic reader.
+<ul>
+  <li>
+    <strong>Initialization:</strong>
+    Point the application to your media library or load an existing SQLite database containing your tags and metadata.
+  </li>
 
-## Setup and Installation
+  <li>
+    <strong>Background Processing:</strong>
+    The application asynchronously scans your directories, generating thumbnails and extracting video frames in the background.
+  </li>
 
-The application requires Python 3.10 or higher. You will need to install the following dependencies: PyQt6, ONNX Runtime, OpenCV, Pillow, and ImageHash. 
+  <li>
+    <strong>Navigation:</strong>
+    Use the sidebar search to find specific tags. The application will instantly query the database to update the main view with relevant files or galleries.
+  </li>
 
-**Installation Steps:**
-1. Clone the repository to your local machine.
-2. Install the required dependencies using pip. If you have an NVIDIA GPU, it is highly recommended to install `onnxruntime-gpu` instead of the standard package to speed up the AI auto-tagging process.
-   ```bash
-   pip install PyQt6 pillow imagehash onnxruntime opencv-python send2trash requests
-   ```
-3. Launch the application by running the main Python script.
+  <li>
+    <strong>Viewing:</strong>
+    Click an image to open it in the native viewer (double-click to zoom and pan), click a video to play it instantly, or open a folder of images to trigger the high-performance comic reader.
+  </li>
+</ul>
 
-**First-Time Configuration:**
-*   Upon launching, you may be prompted to set your primary database folder. 
-*   If you intend to use the video deduplication feature, navigate to that tab and use the provided button to download the required FFmpeg and CLI binaries.
-*   You can adjust your custom UI scaling settings by modifying the configuration JSON file located in the root directory.
+<h2>Setup and Installation</h2>
 
-## Project Structure Overview
+<p>
+The application requires Python 3.10 or higher. You will need to install the following dependencies: PyQt6, ONNX Runtime, OpenCV, Pillow, and ImageHash.
+</p>
 
+<h3>Installation Steps</h3>
+
+<ol>
+  <li>Clone the repository to your local machine.</li>
+
+  <li>
+    Install the required dependencies using pip. If you have an NVIDIA GPU, it is highly recommended to install <code>onnxruntime-gpu</code> instead of the standard package to speed up the AI auto-tagging process.
+  </li>
+</ol>
+
+<pre><code>pip install PyQt6 pillow imagehash onnxruntime opencv-python send2trash requests</code></pre>
+
+<ol start="3">
+  <li>Launch the application by running the main Python script.</li>
+</ol>
+
+<h3>First-Time Configuration</h3>
+
+<ul>
+  <li>Upon launching, you may be prompted to set your primary database folder.</li>
+
+  <li>
+    If you intend to use the video deduplication feature, navigate to that tab and use the provided button to download the required FFmpeg and CLI binaries.
+  </li>
+
+  <li>
+    You can adjust your custom UI scaling settings by modifying the configuration JSON file located in the root directory.
+  </li>
+</ul>
+
+<h2>Project Structure Overview</h2>
+
+<p>
 The architecture of the application is divided into logical components for easier maintenance and development.
+</p>
 
-*   **Main Entry Point**: Handles portable configuration, UI scaling, Windows taskbar integration, and launches the main application window.
-*   **Application Logic (`Src/Logic/app.py`)**: Responsible for binding the user interface to the background workers. It manages the thumbnail generation swarm, handles database queries, and controls the media players.
-*   **User Interface (`Src/Ui/interface.py`)**: Defines the layout, styling, and custom widgets, such as the smart scaling image viewer and custom video controls.
-*   **Background Workers**: Modules like `Src/Logic/deduplication.py` and `Src/Logic/video_dedup.py` handle the heavy lifting for finding duplicate content.
-*   **AI Engine (`Src/Logic/visual_sorter.py`)**: Loads ONNX models to analyze media frames and predict tags.
-*   **Specialized Widgets (`Src/Ui/reader_widget.py`)**: Used specifically to render comic and manga pages smoothly.
+<ul>
+  <li>
+    <strong>Main Entry Point:</strong>
+    Handles portable configuration, UI scaling, Windows taskbar integration, and launches the main application window.
+  </li>
 
-## Usage Tips
+  <li>
+    <strong>Application Logic (Src/Logic/app.py):</strong>
+    Responsible for binding the user interface to the background workers. It manages the thumbnail generation swarm, handles database queries, and controls the media players.
+  </li>
 
-*   **Multi-Monitor Setup**: Click the Detach Viewer button in the sidebar to pop the media player out into its own floating window.
-*   **Zooming**: Double-clicking any static image will zoom in to its native resolution, allowing you to use the scrollbars or mouse wheel to navigate.
-*   **Hardware Acceleration**: If the AI auto-tagger is running slowly, ensure you have the correct ONNX runtime installed and configured in your settings (CUDA for NVIDIA, DirectML for AMD/Intel).
+  <li>
+    <strong>User Interface (Src/Ui/interface.py):</strong>
+    Defines the layout, styling, and custom widgets, such as the smart scaling image viewer and custom video controls.
+  </li>
+
+  <li>
+    <strong>Background Workers:</strong>
+    Modules like <code>Src/Logic/deduplication.py</code> and <code>Src/Logic/video_dedup.py</code> handle the heavy lifting for finding duplicate content.
+  </li>
+
+  <li>
+    <strong>AI Engine (Src/Logic/visual_sorter.py):</strong>
+    Loads ONNX models to analyze media frames and predict tags.
+  </li>
+
+  <li>
+    <strong>Specialized Widgets (Src/Ui/reader_widget.py):</strong>
+    Used specifically to render comic and manga pages smoothly.
+  </li>
+</ul>
+
+<h2>Usage Tips</h2>
+
+<ul>
+  <li>
+    <strong>Multi-Monitor Setup:</strong>
+    Click the Detach Viewer button in the sidebar to pop the media player out into its own floating window.
+  </li>
+
+  <li>
+    <strong>Zooming:</strong>
+    Double-clicking any static image will zoom in to its native resolution, allowing you to use the scrollbars or mouse wheel to navigate.
+  </li>
+
+  <li>
+    <strong>Hardware Acceleration:</strong>
+    If the AI auto-tagger is running slowly, ensure you have the correct ONNX runtime installed and configured in your settings (CUDA for NVIDIA, DirectML for AMD/Intel).
+  </li>
+</ul>
