@@ -1,6 +1,6 @@
 # Media-Nest
 
-<img src="assets/Logo%201.png" width="250" align="right" alt="Media-Nest Logo" style="margin-top:-40px;">
+<img src="assets/Logo%201.png" width="250" align="right" alt="Media-Nest Logo" style="margin-top:-50px;">
 
 Media-Nest is a high-performance desktop application designed for organizing, viewing, and managing extensive local image and video libraries. It focuses heavily on performance, leveraging multithreading and background processing to ensure the user interface remains responsive even when dealing with thousands of files. 
 
