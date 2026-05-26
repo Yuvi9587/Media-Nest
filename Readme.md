@@ -9,7 +9,7 @@ Media-Nest is a high-performance desktop application designed for organizing, vi
 </td>
 
 <td align="right">
-<img src="assets/Logo%201.png" width="140">
+<img src="assets/Logo%201.png" width="800">
 </td>
 </tr>
 </table>
