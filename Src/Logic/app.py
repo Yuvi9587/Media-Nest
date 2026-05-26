@@ -745,7 +745,7 @@ class MediaExplorerApp(QMainWindow):
         self.ui = MainWindowUI()
         self.image_cache = {}
         self.ui.setup_ui(self)
-        self.setWindowTitle("Media Nest V1.0.0")
+        self.setWindowTitle("Media Nest V2.0.0")
         # --- DYNAMIC TEXT SCALING FIX ---
         theme = VSCODE_DARK_THEME
         
