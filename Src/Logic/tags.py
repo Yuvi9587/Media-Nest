@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QProgressBar, QRadioButton, QButtonGroup, QCheckBox,
                              QPlainTextEdit, QStackedWidget, QSlider)
 from PyQt6.QtCore import Qt, QStringListModel, QThread, pyqtSignal, QSize, QUrl
-from PyQt6.QtGui import QPixmap, QImageReader, QMovie, QIcon
+from PyQt6.QtGui import QPixmap, QImageReader, QMovie, QIcon, QColor
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 
@@ -243,6 +243,16 @@ class UniversalMediaViewer(QWidget):
     # --- Routing Logic ---
     def set_image(self, file_path):
         self.clear_image("") 
+        
+        # 🔹 FIX: Validate file exists and is not empty before playing
+        try:
+            if not os.path.exists(file_path) or os.path.getsize(file_path) < 100:
+                self.clear_image("Error: File is empty or corrupted.")
+                return
+        except OSError:
+            self.clear_image("Error: Unable to read file data.")
+            return
+
         ext = os.path.splitext(file_path)[1].lower()
         video_exts = {'.mp4', '.webm', '.mkv', '.mov', '.avi'}
         
@@ -555,17 +565,29 @@ class TagManagerTab(QWidget):
         col1_layout = QVBoxLayout(col1_widget)
         col1_layout.setContentsMargins(0, 0, 5, 0)
         
-        inbox_group = QGroupBox("📬 Tagless Inbox Queue")
+        self.inbox_group = QGroupBox("Tag Management Index (Inbox Queue)")
         inbox_layout = QVBoxLayout()
         
-        self.btn_import_folder = QPushButton("📂 Import External Folder")
+        # --- NEW: Search Bar for Existing Library ---
+        self.search_bar = QLineEdit()
+        self.search_bar.setPlaceholderText("Search existing tags (e.g., 'outdoor') or leave blank for Inbox...")
+        self.search_bar.setStyleSheet("padding: 8px; border-radius: 4px; background-color: #252526; color: white; border: 1px solid #3e3e42;")
+        self.search_bar.returnPressed.connect(self.search_library_by_tag)
+        self.search_completer = QCompleter()
+        self.search_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.search_completer.setModel(self.tag_completer_model)
+        self.search_bar.setCompleter(self.search_completer)
+        inbox_layout.addWidget(self.search_bar)
+        # --------------------------------------------
+        
+        self.btn_import_folder = QPushButton("Import External Folder")
         self.btn_import_folder.setAutoDefault(False)
         self.btn_import_folder.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_import_folder.setStyleSheet("QPushButton { background-color: #007acc; font-weight: bold; border-radius: 4px; padding: 5px; } QPushButton:hover { background-color: #0098ff; }")
         self.btn_import_folder.clicked.connect(self.import_external_folder)
         inbox_layout.addWidget(self.btn_import_folder)
         
-        self.btn_cloud_sync = QPushButton("☁️ Find Matches in Cloud")
+        self.btn_cloud_sync = QPushButton("Find Matches in Cloud")
         self.btn_cloud_sync.setAutoDefault(False)
         self.btn_cloud_sync.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_cloud_sync.setStyleSheet("QPushButton { background-color: #8957e5; color: white; font-weight: bold; border-radius: 4px; padding: 5px; } QPushButton:hover { background-color: #9a68f6; }")
@@ -584,8 +606,8 @@ class TagManagerTab(QWidget):
         self.inbox_list_widget.itemClicked.connect(self.on_inbox_item_selected)
         inbox_layout.addWidget(self.inbox_list_widget)
         
-        inbox_group.setLayout(inbox_layout)
-        col1_layout.addWidget(inbox_group)
+        self.inbox_group.setLayout(inbox_layout)
+        col1_layout.addWidget(self.inbox_group)
 
         # =========================================================
         # COLUMN 2: THE TAGGING ENGINE (UNIFIED)
@@ -594,37 +616,54 @@ class TagManagerTab(QWidget):
         col2_layout = QVBoxLayout(col2_widget)
         col2_layout.setContentsMargins(5, 0, 5, 0)
         
-        active_tags_group = QGroupBox("🏷️ Active Tags (Will be saved)")
+        active_tags_group = QGroupBox("Active Tags (Double-click to delete)")
         active_tags_layout = QVBoxLayout()
         
         self.file_tag_list = QListWidget()
-        self.file_tag_list.setStyleSheet("background-color: #1e1e1e; border: 1px solid #3e3e42; border-radius: 4px; color: #58a6ff;")
+        self.file_tag_list.setStyleSheet("""
+            QListWidget { background-color: #1e1e1e; border-radius: 4px; padding: 5px; color: #58a6ff; }
+            QListWidget::item { padding: 5px; }
+            QListWidget::item:hover { background-color: #3e3e42; border-radius: 3px; }
+        """)
         
         add_tag_layout = QHBoxLayout()
+        add_tag_layout.setSpacing(8)
+        
         self.input_add_tag = QLineEdit()
+        self.input_add_tag.setFixedHeight(34)
         self.input_add_tag.setPlaceholderText("Add tag manually...")
+        self.input_add_tag.setStyleSheet("border-radius: 4px; padding-left: 8px;")
+        
         self.tag_completer = QCompleter()
         self.tag_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.tag_completer.setModel(self.tag_completer_model)
         self.tag_completer.setMaxVisibleItems(10)
         self.input_add_tag.setCompleter(self.tag_completer)
         
-        self.btn_add_tag = QPushButton("➕")
+        self.btn_add_tag = QPushButton()
+        self.btn_add_tag.setFixedHeight(34)
+        self.btn_add_tag.setFixedWidth(40)
+        self.btn_add_tag.setIcon(QIcon(os.path.join("assets", "uisvg", "add.svg")))
+        self.btn_add_tag.setIconSize(QSize(20, 20))
         self.btn_add_tag.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_add_tag.setStyleSheet("QPushButton { background-color: #3e3e42; border-radius: 4px; border: none; padding-left: 10px; padding-right: 10px; } QPushButton:hover { background-color: #505050; }")
         self.btn_add_tag.clicked.connect(self.add_tag_to_current_list)
         self.input_add_tag.returnPressed.connect(self.add_tag_to_current_list)
 
-        self.btn_auto_tag = QPushButton("🤖 AI Tag")
+        self.btn_auto_tag = QPushButton("AI Tag")
+        self.btn_auto_tag.setFixedHeight(34)
+        self.btn_auto_tag.setIcon(QIcon(os.path.join("assets", "uisvg", "ai.svg")))
         self.btn_auto_tag.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_auto_tag.setStyleSheet("QPushButton { background-color: #512da8; color: white; font-weight: bold; border-radius: 4px; padding: 4px; } QPushButton:hover { background-color: #673ab7; }")
+        self.btn_auto_tag.setStyleSheet("QPushButton { background-color: #512da8; color: white; font-weight: bold; border-radius: 4px; padding: 0 15px; border: none; } QPushButton:hover { background-color: #673ab7; }")
         self.btn_auto_tag.clicked.connect(self.run_auto_tagger)
 
         add_tag_layout.addWidget(self.input_add_tag)
         add_tag_layout.addWidget(self.btn_add_tag)
         add_tag_layout.addWidget(self.btn_auto_tag) 
         
-        self.btn_remove_file_tag = QPushButton("❌ Delete Selected Active Tag")
-        self.btn_remove_file_tag.clicked.connect(self.remove_tag_from_current_list)
+        self.btn_remove_file_tag = QPushButton("Delete Selected Active Tag")
+        self.btn_remove_file_tag.setIcon(QIcon(os.path.join("assets", "uisvg", "remove.svg")))
+        self.btn_remove_file_tag.clicked.connect(self.delete_checked_tags)
         
         active_tags_layout.addWidget(self.file_tag_list)
         active_tags_layout.addLayout(add_tag_layout)
@@ -654,14 +693,14 @@ class TagManagerTab(QWidget):
         # 🔹 DYNAMIC BUTTON LAYOUT 🔹
         self.workspace_btn_layout = QHBoxLayout()
         
-        self.btn_approve_all_cloud = QPushButton("🚀 Batch Approve All")
+        self.btn_approve_all_cloud = QPushButton("Batch Approve All")
         self.btn_approve_all_cloud.setMinimumHeight(40)
         self.btn_approve_all_cloud.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_approve_all_cloud.setStyleSheet("QPushButton { background-color: #238636; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #2ea043; }")
         self.btn_approve_all_cloud.clicked.connect(self.batch_approve_all_cloud)
         self.btn_approve_all_cloud.hide()
         
-        self.btn_save_archive = QPushButton("🚀 Archive and Save File")
+        self.btn_save_archive = QPushButton("Archive and Save File")
         self.btn_save_archive.setMinimumHeight(40) 
         self.btn_save_archive.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
@@ -683,7 +722,9 @@ class TagManagerTab(QWidget):
 
         main_layout.addWidget(self.splitter)
 
-        self.cb_help_others = QCheckBox("🤝 Help others by anonymously sharing these tags to the community cloud")
+        self.cb_help_others = QCheckBox("Help others by anonymously sharing these tags to the community cloud")
+        self.cb_help_others.setIcon(QIcon(os.path.join("assets", "uisvg", "handshake.svg")))
+        self.cb_help_others.setIconSize(QSize(20, 20))
         self.cb_help_others.setChecked(True)
         self.cb_help_others.setStyleSheet("QCheckBox { color: #888; font-style: italic; font-size: 13px; }")
 
@@ -750,13 +791,14 @@ class TagManagerTab(QWidget):
         creator_folder = os.path.basename(os.path.dirname(file_path))
         
         if file_hash in self.pending_cloud_matches:
-            display_text = f"☁️ [{creator_folder}] {file_name}"
+            display_text = f"[{creator_folder}] {file_name}"
         else:
             display_text = f"[{creator_folder}] {file_name}"
         
         item = QListWidgetItem(display_text)
         if file_hash in self.pending_cloud_matches:
-            item.setForeground(Qt.GlobalColor.magenta)
+            item.setForeground(QColor("#b388ff"))
+            item.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "cloud.svg"))))
             
         item.setData(Qt.ItemDataRole.UserRole, {"path": file_path, "hash": file_hash})
         self.inbox_list_widget.addItem(item)
@@ -850,26 +892,97 @@ class TagManagerTab(QWidget):
         try:
             conn = sqlite3.connect(library_db)
             cursor = conn.cursor()
+            
+            # 1. 🔹 AUTO-CLEAN DUPLICATES: Keep only the first entry for each hash
+            cursor.execute("""
+                DELETE FROM tagless 
+                WHERE rowid NOT IN (
+                    SELECT MIN(rowid) 
+                    FROM tagless 
+                    GROUP BY hash
+                )
+            """)
+            conn.commit()
+
+            # 2. Fetch the clean list
             cursor.execute("SELECT file_name, file_path, hash FROM tagless ORDER BY file_name ASC")
             rows = cursor.fetchall()
+            
+            invalid_hashes = []
+            valid_items_count = 0
+            
             for file_name, file_path, file_hash in rows:
+                
+                # 3. 🔹 VERIFY FILE EXISTS ON DISK
+                if not file_path or not os.path.exists(file_path):
+                    invalid_hashes.append(file_hash)
+                    continue
+                
+                valid_items_count += 1
                 creator_folder = os.path.basename(os.path.dirname(file_path))
                 
                 if file_hash in self.pending_cloud_matches:
-                    display_text = f"☁️ [{creator_folder}] {file_name}"
+                    display_text = f"[{creator_folder}] {file_name}"
                 else:
                     display_text = f"[{creator_folder}] {file_name}"
                 
                 item = QListWidgetItem(display_text)
                 if file_hash in self.pending_cloud_matches:
-                    item.setForeground(Qt.GlobalColor.magenta)
+                    item.setForeground(QColor("#b388ff"))
+                    item.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "cloud.svg"))))
                     
                 item.setData(Qt.ItemDataRole.UserRole, {"path": file_path, "hash": file_hash})
                 self.inbox_list_widget.addItem(item)
+                
+            # 4. 🔹 DELETE GHOST FILES FROM DATABASE
+            if invalid_hashes:
+                for h in invalid_hashes:
+                    cursor.execute("DELETE FROM tagless WHERE hash = ?", (h,))
+                conn.commit()
+                self.log(f"[DB: library.db] Inbox Cleanup: Removed {len(invalid_hashes)} missing files from database.")
+
             conn.close()
-            self.log(f"[DB: library.db] Tagless Queue synchronized. ({len(rows)} items)")
+            self.log(f"[DB: library.db] Tagless Queue synchronized. ({valid_items_count} items)")
+            
         except Exception as e:
-            pass
+            self.log(f"TAGLESS SYNC ERR: {e}")
+
+    def search_library_by_tag(self):
+        """Searches the main library for a tag. If empty, loads the Tagless Inbox."""
+        search_text = self.search_bar.text().strip().lower()
+        self.inbox_list_widget.clear()
+        self.file_tag_list.clear()
+        
+        library_db, _ = self.get_db_paths()
+        if not os.path.exists(library_db): return
+            
+        conn = sqlite3.connect(library_db)
+        cursor = conn.cursor()
+
+        if not search_text:
+            # If search is blank, load the normal Inbox Queue
+            self.inbox_group.setTitle("Tag Management Index (Inbox Queue)")
+            self.refresh_tagless_inbox()
+            conn.close()
+            return
+        
+        # If searching, find all files that have this tag in the main library
+        self.inbox_group.setTitle(f"Tag Management Index (Results for: {search_text})")
+        cursor.execute("""
+            SELECT i.hash, i.file_path, i.file_name 
+            FROM Images i
+            JOIN ImageTags it ON i.hash = it.hash
+            JOIN Tags t ON it.tag_id = t.tag_id
+            WHERE t.tag_name LIKE ?
+        """, (f"%{search_text}%",))
+
+        for row in cursor.fetchall():
+            file_hash, file_path, file_name = row
+            item = QListWidgetItem(file_name)
+            item.setData(Qt.ItemDataRole.UserRole, {"path": file_path, "hash": file_hash})
+            self.inbox_list_widget.addItem(item)
+
+        conn.close()
 
     def load_file_into_tagger(self, file_path, file_hash):
         if not os.path.exists(file_path): return
@@ -879,20 +992,59 @@ class TagManagerTab(QWidget):
         self.file_tag_list.clear()
         self.input_add_tag.clear()
 
+        # 🔹 FETCH EXISTING TAGS FROM DATABASE
+        library_db, _ = self.get_db_paths()
+        if os.path.exists(library_db):
+            conn = sqlite3.connect(library_db)
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM tagless WHERE hash = ?", (file_hash,))
+            is_in_tagless = cursor.fetchone() is not None
+            cursor.execute("""
+                SELECT t.tag_id, t.tag_name 
+                FROM Tags t
+                JOIN ImageTags it ON t.tag_id = it.tag_id
+                WHERE it.hash = ?
+            """, (file_hash,))
+            
+            for row in cursor.fetchall():
+                tag_id, tag_name = row
+                item = QListWidgetItem(tag_name) # Removed the X
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable) # Adds Checkbox
+                item.setCheckState(Qt.CheckState.Unchecked) # Defaults to unchecked
+                item.setForeground(QColor("#ff6b6b"))
+                item.setData(Qt.ItemDataRole.UserRole, {"tag_id": tag_id, "tag_name": tag_name, "is_saved": True})
+                self.file_tag_list.addItem(item)
+            conn.close()
+
         # 🔹 SMART UI: Inject Cloud tags directly into Active list
         if file_hash in self.pending_cloud_matches:
             for tag in self.pending_cloud_matches[file_hash]:
-                item = QListWidgetItem(f"☁️ {tag}")
-                item.setForeground(Qt.GlobalColor.magenta)
+                item = QListWidgetItem(f"{tag}")
+                item.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "cloud.svg"))))
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable) 
+                item.setCheckState(Qt.CheckState.Unchecked)
+                item.setForeground(QColor("#b388ff"))
                 self.file_tag_list.addItem(item)
                 
-            # 🔹 DYNAMIC BUTTONS: Cloud File Selected
-            self.btn_save_archive.setText("☑️ Approve Selected")
+        # 🔹 DYNAMIC BUTTONS: Handle all 3 states
+        if not is_in_tagless:
+            # State 1: File is already in the main library
+            self.btn_save_archive.setEnabled(False)
+            self.btn_save_archive.setText("Already Archived")
+            self.btn_save_archive.setStyleSheet("QPushButton { background-color: #2d2d2d; color: #666666; font-weight: bold; font-size: 14px; border-radius: 4px; border: 1px solid #3e3e42; }")
+            self.btn_approve_all_cloud.hide()
+            
+        elif file_hash in self.pending_cloud_matches:
+            # State 2: File is new AND has Cloud matches
+            self.btn_save_archive.setEnabled(True)
+            self.btn_save_archive.setText("Approve Selected")
             self.btn_save_archive.setStyleSheet("QPushButton { background-color: #8957e5; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #9a68f6; }")
             self.btn_approve_all_cloud.show()
+            
         else:
-            # 🔹 DYNAMIC BUTTONS: Normal File Selected
-            self.btn_save_archive.setText("🚀 Archive and Save File")
+            # State 3: File is new (Normal Inbox Queue)
+            self.btn_save_archive.setEnabled(True)
+            self.btn_save_archive.setText("Archive and Save File")
             self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
             self.btn_approve_all_cloud.hide()
 
@@ -906,16 +1058,64 @@ class TagManagerTab(QWidget):
         tag_value = self.input_add_tag.text().strip().lower().replace(" ", "_")
         if not tag_value: return
         
-        # Check against clean tags so we don't add duplicates
-        existing_items = [self.file_tag_list.item(i).text().replace("☁️ ", "") for i in range(self.file_tag_list.count())]
+        # 1. Safely gather all existing tags to prevent duplicates
+        existing_items = []
+        for i in range(self.file_tag_list.count()):
+            t = self.file_tag_list.item(i).text()
+            t = t.replace("☁️ ", "").replace("☁️", "").strip()
+            existing_items.append(t)
+
+        # 2. Add the tag if it's truly unique
         if tag_value not in existing_items: 
-            self.file_tag_list.addItem(tag_value)
+            item = QListWidgetItem(tag_value)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable) 
+            item.setCheckState(Qt.CheckState.Unchecked)
+            self.file_tag_list.addItem(item)
+            
+            # 3. Wake up the Save button if this is an archived file!
+            self.wake_up_save_button()
             
         self.input_add_tag.clear()
 
-    def remove_tag_from_current_list(self):
-        current_row = self.file_tag_list.currentRow()
-        if current_row >= 0: self.file_tag_list.takeItem(current_row)
+    def delete_checked_tags(self):
+        """Finds all checked tags and deletes them from the UI and Database."""
+        if not self.current_file_hash: return
+        
+        # 1. Gather all checked items
+        items_to_delete = []
+        for i in range(self.file_tag_list.count()):
+            item = self.file_tag_list.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                items_to_delete.append(item)
+                
+        if not items_to_delete:
+            return # Nothing was checked!
+
+        # 2. Ask for confirmation once for all tags
+        reply = QMessageBox.question(self, "Delete Tags", 
+                                     f"Are you sure you want to delete {len(items_to_delete)} selected tags?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+        if reply == QMessageBox.StandardButton.Yes:
+            library_db, _ = self.get_db_paths()
+            conn = sqlite3.connect(library_db)
+            cursor = conn.cursor()
+            
+            # 3. Loop through and delete
+            for item in items_to_delete:
+                data = item.data(Qt.ItemDataRole.UserRole)
+                
+                # If it's a saved tag, permanently remove it from the database
+                if isinstance(data, dict) and data.get("is_saved"):
+                    tag_id = data["tag_id"]
+                    cursor.execute("DELETE FROM ImageTags WHERE hash = ? AND tag_id = ?", (self.current_file_hash, tag_id))
+                
+                # Remove it from the UI list
+                self.file_tag_list.takeItem(self.file_tag_list.row(item))
+                
+            conn.commit()
+            conn.close()
+            self.log(f"Bulk deleted {len(items_to_delete)} tags.")
 
     def run_auto_tagger(self):
         from Src.Logic.visual_sorter import VisualSorter 
@@ -948,10 +1148,25 @@ class TagManagerTab(QWidget):
                 # 🔹 STRICT CUTOFF: Force the final list to never exceed 31 tags
                 new_tags = new_tags[:31]
 
-                existing_items = [self.file_tag_list.item(i).text().replace("☁️ ", "") for i in range(self.file_tag_list.count())]
+                # 🔹 SMART DUPLICATE PREVENTION
+                existing_items = []
+                for i in range(self.file_tag_list.count()):
+                    t = self.file_tag_list.item(i).text()
+                    t = t.replace("☁️ ", "").replace("☁️", "").strip()
+                    existing_items.append(t)
 
+                added_new_tags = False
                 for t in new_tags:
-                    if t not in existing_items: self.file_tag_list.addItem(t)
+                    if t not in existing_items: 
+                        item = QListWidgetItem(t)
+                        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable) 
+                        item.setCheckState(Qt.CheckState.Unchecked)
+                        self.file_tag_list.addItem(item)
+                        added_new_tags = True
+                
+                # 🔹 WAKE UP THE SAVE BUTTON IF AI FOUND NEW UNIQUE TAGS
+                if added_new_tags:
+                    self.wake_up_save_button()
         except Exception as e:
             self.log(f"AI CRITICAL: Engine failure -> {e}")
         finally:
@@ -1033,7 +1248,7 @@ class TagManagerTab(QWidget):
             self.btn_approve_all_cloud.hide()
             
             # 🔹 Reset the Save button style
-            self.btn_save_archive.setText("🚀 Archive and Save File")
+            self.btn_save_archive.setText("Archive and Save File")
             self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
             
             if self.current_file_hash:
@@ -1075,6 +1290,13 @@ class TagManagerTab(QWidget):
         except Exception as e: 
             self.log(f"CLOUD SYNC [ERR]: Handshake failed. Network may be unreachable.")
 
+    def wake_up_save_button(self):
+        """Wakes up the save button if a user adds new tags to an already archived file."""
+        if not self.btn_save_archive.isEnabled():
+            self.btn_save_archive.setEnabled(True)
+            self.btn_save_archive.setText("Save Updates to Archive")
+            self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
+            
     # =========================================================
     # MAIN TRANSACTION ENGINE: THE GRADUATION PARSER
     # =========================================================
@@ -1135,7 +1357,7 @@ class TagManagerTab(QWidget):
             self.current_file_hash = None
             
             # 🔹 Reset dynamic buttons
-            self.btn_save_archive.setText("🚀 Archive and Save File")
+            self.btn_save_archive.setText("Archive and Save File")
             self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
             self.btn_approve_all_cloud.hide()
             

@@ -7,7 +7,9 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QLabel,
     QPushButton,
-    QAbstractItemView
+    QAbstractItemView,
+    QComboBox,
+    QLineEdit
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QIcon
@@ -47,6 +49,44 @@ class GallerySection(QWidget):
             font-weight: bold;
         """)
 
+        # --- Local File Name Filter ---
+        self.name_filter_input = QLineEdit()
+        self.name_filter_input.setPlaceholderText("Filter by name...")
+        self.name_filter_input.setFixedWidth(180)
+        self.name_filter_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #2d2d30;
+                color: white;
+                border: 1px solid #3e3e42;
+                border-radius: 6px;
+                padding: 4px 10px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #007acc;
+            }
+        """)
+
+        # --- Filter Dropdown ---
+        self.filter_combo = QComboBox()
+        self.filter_combo.addItems(["All", "Images", "Videos"])
+        self.filter_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.filter_combo.setStyleSheet("""
+            QComboBox { 
+                background-color: #2d2d30; 
+                color: white; 
+                border: 1px solid #3e3e42; 
+                border-radius: 6px; 
+                padding: 4px 10px; 
+                font-weight: bold;
+            }
+            QComboBox::drop-down { border: none; }
+            QComboBox QAbstractItemView {
+                background-color: #252526;
+                color: white;
+                selection-background-color: #007acc;
+            }
+        """)
+
         # --- SVG Size Toggle Button ---
         self.btn_size_toggle = QPushButton()
         self.btn_size_toggle.setFixedSize(42, 32)
@@ -66,15 +106,14 @@ class GallerySection(QWidget):
         """)
 
         # Default icon = large
-        self.btn_size_toggle.setIcon(QIcon(os.path.join(self.svg_dir, "large.svg"))
-        
-        )
-        
+        self.btn_size_toggle.setIcon(QIcon(os.path.join(self.svg_dir, "large.svg")))
         self.btn_size_toggle.setIconSize(QSize(20, 20))
         self.btn_size_toggle.setContentsMargins(0, 0, 0, 0)
 
         header_layout.addWidget(self.lbl_header)
         header_layout.addStretch()
+        header_layout.addWidget(self.name_filter_input) 
+        header_layout.addWidget(self.filter_combo)
         header_layout.addWidget(self.btn_size_toggle)
 
         header_container.setStyleSheet("""
@@ -91,6 +130,8 @@ class GallerySection(QWidget):
         self.list_widget.setGridSize(QSize(self.TILE_WIDTH, self.TILE_HEIGHT))
         self.list_widget.setUniformItemSizes(True)
         self.list_widget.setSpacing(0)
+        self.list_widget.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.list_widget.setWordWrap(False)
         self.list_widget.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.list_widget.setResizeMode(QListWidget.ResizeMode.Adjust)
@@ -127,7 +168,6 @@ class GallerySection(QWidget):
 
     # ================= SIZE TOGGLE =================
     def toggle_size_mode(self):
-
         if self.current_mode == "large":
             self.current_mode = "medium"
             width, height, icon = self.MEDIUM
@@ -173,10 +213,16 @@ class GallerySection(QWidget):
             )
             item.setToolTip(name)
 
+            from PyQt6.QtGui import QIcon
+            import os
+            svg_path = os.path.join("assets", "uisvg")
+
             if is_video:
-                item.setText(f"🎬 {name}")
+                item.setIcon(QIcon(os.path.join(svg_path, "video.svg")))
+                item.setText(name)
             else:
-                item.setText(f"🖼️ {name}")
+                item.setIcon(QIcon(os.path.join(svg_path, "image.svg")))
+                item.setText(name)
 
             self.list_widget.addItem(item)
 
@@ -199,20 +245,16 @@ class GallerySection(QWidget):
             width, height, icon = self.LARGE
             icon_name = "large.svg"
 
-        # Update the button icon if it exists
         if hasattr(self, 'btn_size_toggle'):
             self.btn_size_toggle.setIcon(QIcon(os.path.join(self.svg_dir, icon_name)))
 
-        # Update core size variables
         self.TILE_WIDTH = width
         self.TILE_HEIGHT = height
         self.ICON_SIZE = icon
 
-        # Apply to the Grid
         self.list_widget.setIconSize(QSize(icon, icon))
         self.list_widget.setGridSize(QSize(width, height))
 
-        # Resize all existing items instantly
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
             item.setSizeHint(QSize(width, height))

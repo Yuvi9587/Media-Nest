@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QMessageBox, QTabWidget, QWidget, QComboBox, 
                              QScrollArea, QProgressBar, QCheckBox, QSlider, QFrame, QApplication)
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread
-from PyQt6.QtGui import QPixmap, QImageReader, QImage
+from PyQt6.QtGui import QPixmap, QImageReader, QImage, QIcon
 
 from send2trash import send2trash  
 from Src.Logic.deduplication import DeduplicationWorker
@@ -72,7 +72,7 @@ class FocusableClickableLabel(QLabel):
 class SettingsDialog(QDialog):
     def __init__(self, config_path, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("⚙️ Media Nest Settings")
+        self.setWindowTitle("Media Nest Settings")
         self.setMinimumWidth(1100) 
         self.setMinimumHeight(700)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowMaximizeButtonHint | Qt.WindowType.WindowMinimizeButtonHint)
@@ -81,8 +81,10 @@ class SettingsDialog(QDialog):
         import sys
         if getattr(sys, 'frozen', False):
             base_dir = os.path.dirname(sys.executable)
+            self.asset_base_dir = getattr(sys, '_MEIPASS', os.path.abspath("."))
         else:
             base_dir = os.path.abspath(".") 
+            self.asset_base_dir = base_dir
             
         self.config_path = os.path.join(base_dir, "config.json")
         self.current_db_folder = ""
@@ -104,10 +106,17 @@ class SettingsDialog(QDialog):
             "125%": "1.25", "150%": "1.5", "175%": "1.75", "200%": "2.0"
         }
         self.reverse_scale_map = {v: k for k, v in self.scale_map.items()}
+        # --- Performance Map ---
+        self.current_perf_mode = "balanced"
+        self.perf_map = {
+            "High Performance (Max Speed)": "high",
+            "Balanced (Default)": "balanced",
+            "Power Saver / Low End PC": "low"
+        }
+        self.reverse_perf_map = {v: k for k, v in self.perf_map.items()}
 
         self.load_config()
         self.setup_ui()
-
     def load_config(self):
         from PyQt6.QtCore import QSettings
         
@@ -129,6 +138,7 @@ class SettingsDialog(QDialog):
                         
                     self.current_ui_scale = config.get("ui_scale", "1.0")
                     self.current_strictness = config.get("dedupe_strictness", 0) 
+                    self.current_perf_mode = config.get("performance_mode", "balanced")
             except Exception:
                 pass
 
@@ -147,12 +157,12 @@ class SettingsDialog(QDialog):
         self.tab_video_dedup = None
         self.tab_video_placeholder = QWidget()
         
-        self.tabs.addTab(self.tab_database, "🗄️ Database")
-        self.tabs.addTab(self.tab_interface, "🎨 Interface")
-        self.tabs.addTab(self.tab_tag_placeholder, "🏷️ Tag Manager") 
+        self.tabs.addTab(self.tab_database, "Database")
+        self.tabs.addTab(self.tab_interface, "Interface")
+        self.tabs.addTab(self.tab_tag_placeholder, "Tag Manager") 
         self.tabs.currentChanged.connect(self.on_tab_changed)
-        self.tabs.addTab(self.tab_dedupe, "👯 Image Dedup")
-        self.tabs.addTab(self.tab_video_placeholder, "🎥 Video Dedup")
+        self.tabs.addTab(self.tab_dedupe, "Image Dedup")
+        self.tabs.addTab(self.tab_video_placeholder, "Video Dedup")
 
         # --- DATABASE TAB ---
         db_layout = QVBoxLayout(self.tab_database)
@@ -172,8 +182,11 @@ class SettingsDialog(QDialog):
 
         # --- INTERFACE TAB ---
         ui_layout = QVBoxLayout(self.tab_interface)
-        ui_group = QGroupBox("Visual Settings")
+        ui_group = QGroupBox("Visual & Performance Settings")
         ui_inner_layout = QVBoxLayout()
+        ui_inner_layout.setSpacing(15) # Add nice spacing between rows
+        
+        # 1. Scale Row
         scale_row = QHBoxLayout()
         scale_row.addWidget(QLabel("Window UI Scale (Requires Restart):"))
         self.combo_scale = QComboBox()
@@ -182,6 +195,18 @@ class SettingsDialog(QDialog):
         scale_row.addWidget(self.combo_scale)
         scale_row.addStretch() 
         ui_inner_layout.addLayout(scale_row)
+        
+        # 2. NEW: Performance Row
+        perf_row = QHBoxLayout()
+        perf_row.addWidget(QLabel("Performance Mode:"))
+        self.combo_perf = QComboBox()
+        self.combo_perf.addItems(list(self.perf_map.keys()))
+        self.combo_perf.setCurrentText(self.reverse_perf_map.get(self.current_perf_mode, "Balanced (Default)"))
+        self.combo_perf.setToolTip("Adjusts how aggressively background thumbnails and AI workers consume CPU.")
+        perf_row.addWidget(self.combo_perf)
+        perf_row.addStretch()
+        ui_inner_layout.addLayout(perf_row)
+        
         ui_group.setLayout(ui_inner_layout)
         ui_layout.addWidget(ui_group)
         ui_layout.addStretch()
@@ -197,12 +222,12 @@ class SettingsDialog(QDialog):
         command_layout.setContentsMargins(15, 15, 15, 15)
 
         action_row = QHBoxLayout()
-        self.btn_scan_dupes = QPushButton("🔍 Scan Library")
+        self.btn_scan_dupes = QPushButton("Scan Library")
         self.btn_scan_dupes.setFixedSize(140, 36)
         self.btn_scan_dupes.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_scan_dupes.clicked.connect(lambda: self.start_dedupe_scan(is_auto_rescan=False)) 
         
-        self.btn_auto_delete = QPushButton("✨ Auto-Delete Low Res")
+        self.btn_auto_delete = QPushButton("Auto-Delete Low Res")
         self.btn_auto_delete.setFixedSize(210, 36)
         self.btn_auto_delete.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_auto_delete.setEnabled(False)
@@ -210,7 +235,7 @@ class SettingsDialog(QDialog):
 
         self.dedupe_search_bar = QLineEdit()
         self.dedupe_search_bar.setFixedHeight(36)
-        self.dedupe_search_bar.setPlaceholderText("🔍 Filter duplicates by tags...")
+        self.dedupe_search_bar.setPlaceholderText("Filter duplicates by tags...")
         self.dedupe_search_bar.setEnabled(False)
         self.dedupe_search_bar.textChanged.connect(self.filter_duplicates)
 
@@ -267,14 +292,14 @@ class SettingsDialog(QDialog):
         self.dedupe_scroll.verticalScrollBar().valueChanged.connect(self.on_dedupe_scroll)
         content_split_layout.addWidget(self.dedupe_scroll, stretch=6) 
 
-        # --- THE NEW SCROLLABLE STACKED PREVIEW PANEL ---
+        # --- THE SCROLLABLE STACKED PREVIEW PANEL ---
         self.preview_panel = QFrame()
         self.preview_panel.setObjectName("PreviewPanel")
         self.preview_panel.setStyleSheet("#PreviewPanel { background-color: #252526; border-radius: 8px; border: 1px solid #3e3e42; }")
         preview_layout = QVBoxLayout(self.preview_panel)
         preview_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        lbl_preview_title = QLabel("🔍 Group Comparison")
+        lbl_preview_title = QLabel("Group Comparison")
         lbl_preview_title.setStyleSheet("font-weight: bold; font-size: 15px; color: #ffffff;")
         preview_layout.addWidget(lbl_preview_title)
 
@@ -534,7 +559,7 @@ class SettingsDialog(QDialog):
             
             info_html = (
                 f"<b style='color:{text_color}; font-size:15px;'>Image {index + 1}: {filename}</b><br>"
-                f"<b>📐 Res:</b> {res_text} &nbsp;&nbsp;|&nbsp;&nbsp; <b>💾 Size:</b> {size_mb:.2f} MB"
+                f"<b>Res:</b> {res_text} &nbsp;&nbsp;|&nbsp;&nbsp; <b>Size:</b> {size_mb:.2f} MB"
             )
             lbl_info.setText(info_html)
             
@@ -547,7 +572,7 @@ class SettingsDialog(QDialog):
         tab_name = self.tabs.tabText(index)
         
         # 1. Check if the user clicked an advanced tab
-        if tab_name in ["🏷️ Tag Manager", "👯 Image Dedup", "🎥 Video Dedup"]:
+        if tab_name in ["Tag Manager", "Image Dedup", "Video Dedup"]:
             from PyQt6.QtCore import QSettings
             settings = QSettings("MediaNest", "AppConfig")
             
@@ -566,29 +591,31 @@ class SettingsDialog(QDialog):
                     return
 
         # 3. 🔹 LAZY LOADING LOGIC 🔹
-        if tab_name == "🏷️ Tag Manager":
+        if tab_name == "Tag Manager":
             # If it hasn't been built yet, build it now!
             if self.tab_tag_manager is None:
-                self.tabs.setTabText(index, "⏳ Loading...")
+                self.tabs.setTabIcon(index, QIcon(os.path.join(self.asset_base_dir, "assets", "uisvg", "loading.svg")))
+                self.tabs.setTabText(index, "Loading...")
                 QApplication.processEvents() # Force UI to show loading text
                 
                 self.tab_tag_manager = TagManagerTab(self)
                 self.tabs.removeTab(index)
-                self.tabs.insertTab(index, self.tab_tag_manager, "🏷️ Tag Manager")
+                self.tabs.insertTab(index, self.tab_tag_manager, "Tag Manager")
                 self.tabs.setCurrentIndex(index)
             
             # 🔹 ANTI-FREEZE: Delay the database refresh by 20ms so the UI switches tabs instantly!
             QTimer.singleShot(20, self.tab_tag_manager.refresh_global_tags)
             QTimer.singleShot(20, self.tab_tag_manager.refresh_tagless_inbox)
 
-        elif tab_name == "🎥 Video Dedup":
+        elif tab_name == "Video Dedup":
             if self.tab_video_dedup is None:
-                self.tabs.setTabText(index, "⏳ Loading...")
+                self.tabs.setTabIcon(index, QIcon(os.path.join(self.asset_base_dir, "assets", "uisvg", "loading.svg")))
+                self.tabs.setTabText(index, "Loading...")
                 QApplication.processEvents()
                 
                 self.tab_video_dedup = VideoDedupTab(self)
                 self.tabs.removeTab(index)
-                self.tabs.insertTab(index, self.tab_video_dedup, "🎥 Video Dedup")
+                self.tabs.insertTab(index, self.tab_video_dedup, "Video Dedup")
                 self.tabs.setCurrentIndex(index)
 
     def clear_preview(self):
@@ -622,7 +649,8 @@ class SettingsDialog(QDialog):
             return
 
         self.btn_scan_dupes.setEnabled(False)
-        self.btn_scan_dupes.setText("⏳ Scanning...")
+        self.btn_scan_dupes.setIcon(QIcon(os.path.join(self.asset_base_dir, "assets", "uisvg", "loading.svg")))
+        self.btn_scan_dupes.setText("Scanning...")
         self.pb_dedupe.setVisible(True)
         self.pb_dedupe.setValue(0)
         
@@ -656,21 +684,22 @@ class SettingsDialog(QDialog):
 
     def dedupe_finished(self):
         self.btn_scan_dupes.setEnabled(True)
-        self.btn_scan_dupes.setText("🔍 Scan Library")
+        self.btn_scan_dupes.setIcon(QIcon())
+        self.btn_scan_dupes.setText("Scan Library")
         self.pb_dedupe.setVisible(False)
 
     def render_duplicates_ui(self, duplicate_groups):
         self.current_duplicate_groups = duplicate_groups 
 
         if not duplicate_groups:
-            self.lbl_dedupe_status.setText("✅ Library is clean! No duplicates found.")
+            self.lbl_dedupe_status.setText("Library is clean! No duplicates found.")
             return
 
         self.btn_auto_delete.setEnabled(True)
         self.dedupe_search_bar.setEnabled(True)
 
-        if self.auto_delete_mode == "safe": self.btn_auto_delete.setText("✨ Auto-Delete Low Res")
-        else: self.btn_auto_delete.setText("✨ Auto-Delete Low MB (Same Res)")
+        if self.auto_delete_mode == "safe": self.btn_auto_delete.setText("Auto-Delete Low Res")
+        else: self.btn_auto_delete.setText("Auto-Delete Low MB (Same Res)")
 
         self.render_queue = list(enumerate(duplicate_groups))
         self.total_render_items = len(self.render_queue)
@@ -692,7 +721,7 @@ class SettingsDialog(QDialog):
         if path in self.thumb_labels_map:
             widgets = self.thumb_labels_map[path]
             widgets['thumb'].setPixmap(QPixmap.fromImage(qimage))
-            widgets['info'].setText(f"📐 {res_text}  |  💾 {size_mb} MB")
+            widgets['info'].setText(f"{res_text}  |  {size_mb} MB")
 
     def render_next_batch(self):
         if not self.render_queue:
@@ -722,18 +751,18 @@ class SettingsDialog(QDialog):
         card_main_layout.setContentsMargins(15, 15, 15, 15)
 
         header_layout = QHBoxLayout()
-        lbl_title = QLabel(f"📄 Duplicate Group #{i+1}")
+        lbl_title = QLabel(f"Duplicate Group #{i+1}")
         lbl_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #ffffff;")
         lbl_conf = QLabel(f"Confidence: {avg_conf}%")
         conf_color = "#3fb950" if avg_conf > 90 else "#d29922"
         lbl_conf.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {conf_color}; background-color: rgba(0,0,0,0.2); padding: 4px 8px; border-radius: 4px;")
         
-        btn_ignore = QPushButton("✅ Mark as 'Not Duplicates'")
+        btn_ignore = QPushButton("Mark as 'Not Duplicates'")
         btn_ignore.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_ignore.setStyleSheet("QPushButton { background-color: transparent; border: 1px solid #3fb950; color: #3fb950; padding: 4px 10px; border-radius: 4px; font-weight: bold; } QPushButton:hover { background-color: rgba(63, 185, 80, 0.1); }")
         
         # --- Delete All Button ---
-        btn_delete_all = QPushButton("🗑️ Delete All")
+        btn_delete_all = QPushButton("Delete All")
         btn_delete_all.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_delete_all.setStyleSheet("QPushButton { background-color: transparent; border: 1px solid #a31515; color: #a31515; padding: 4px 10px; border-radius: 4px; font-weight: bold; } QPushButton:hover { background-color: rgba(163, 21, 21, 0.1); }")
         
@@ -798,7 +827,7 @@ class SettingsDialog(QDialog):
 
             self.thumb_labels_map[file_path] = {'thumb': lbl_thumb, 'info': lbl_info}
 
-            btn_del = QPushButton("🗑️ Recycle Bin")
+            btn_del = QPushButton("Recycle Bin")
             btn_del.setCursor(Qt.CursorShape.PointingHandCursor)
             btn_del.setStyleSheet("QPushButton { background-color: #a31515; color: white; padding: 6px; margin-top: 4px; border-radius: 4px; } QPushButton:hover { background-color: #d13438; }")
             btn_del.clicked.connect(lambda checked, p=file_path, w=item_widget: self.delete_duplicate(p, w))
@@ -952,7 +981,7 @@ class SettingsDialog(QDialog):
         if not files_to_delete:
             if self.auto_delete_mode == "safe":
                 self.auto_delete_mode = "aggressive"
-                self.btn_auto_delete.setText("✨ Auto-Delete Low MB (Same Res)")
+                self.btn_auto_delete.setText("Auto-Delete Low MB (Same Res)")
                 QMessageBox.information(self, "Phase 1 Complete", "All strictly low-resolution duplicates have been cleaned!\n\nThe button has now updated to Phase 2. Click it again to clean up duplicates that share the exact same resolution by keeping the largest/best file.")
             else:
                 QMessageBox.information(self, "Fully Clean", "No remaining duplicates found to auto-delete.")
@@ -1111,6 +1140,17 @@ class SettingsDialog(QDialog):
                     "You have changed the UI Scale.\n\nPlease restart Media Nest for the new scaling to take effect!"
                 )
                 
+            # --- Save Performance Mode ---
+            new_perf_val = self.perf_map[self.combo_perf.currentText()]
+            if new_perf_val != self.current_perf_mode:
+                config["performance_mode"] = new_perf_val
+                self.current_perf_mode = new_perf_val
+                config_changed = True
+                
+            if new_strictness != config.get("dedupe_strictness", 0):
+                config["dedupe_strictness"] = new_strictness
+                config_changed = True
+
             if new_strictness != config.get("dedupe_strictness", 0):
                 config["dedupe_strictness"] = new_strictness
                 config_changed = True

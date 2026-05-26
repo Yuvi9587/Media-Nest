@@ -5,14 +5,15 @@ import sqlite3
 import subprocess
 import requests
 import zipfile
+import re
 from collections import defaultdict
 from send2trash import send2trash
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QTextEdit, QLabel, QScrollArea, QFrame, QSplitter, 
-                             QMessageBox, QSlider, QProgressBar)
+                             QMessageBox, QSlider, QProgressBar, QCheckBox)
 from PyQt6.QtCore import Qt, QProcess, QThread, pyqtSignal, pyqtSlot, QUrl
-from PyQt6.QtGui import QPixmap, QImage
+from PyQt6.QtGui import QPixmap, QImage, QIcon
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 
@@ -71,10 +72,9 @@ class ThumbnailWorker(QThread):
 # 📥 DOWNLOAD WORKER (VDF + FFMPEG)
 # ==========================================
 class EngineDownloadThread(QThread):
-    """Downloads both the VDF CLI engine and FFmpeg, extracts them, and cleans up."""
     progress = pyqtSignal(int)
     status = pyqtSignal(str)
-    log_msg = pyqtSignal(str) # 🔹 Detailed console logging
+    log_msg = pyqtSignal(str) 
     finished_signal = pyqtSignal(bool, str)
 
     def __init__(self, extract_dir):
@@ -84,7 +84,6 @@ class EngineDownloadThread(QThread):
         self.ffmpeg_url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
 
     def _download_file(self, url, dest_path, status_text):
-        """Helper function to download a file and update the progress bar."""
         self.status.emit(status_text)
         self.log_msg.emit(f"\n> [NETWORK] {status_text}")
         self.log_msg.emit(f"  ├─ Source: {url}")
@@ -112,7 +111,6 @@ class EngineDownloadThread(QThread):
             self.log_msg.emit(f"  └─ Path: {self.extract_dir}")
             os.makedirs(self.extract_dir, exist_ok=True)
             
-            # --- 1. DOWNLOAD VDF ---
             vdf_zip = os.path.join(self.extract_dir, "vdf.zip")
             if not self._download_file(self.vdf_url, vdf_zip, "Downloading VDF Engine..."): return
             
@@ -121,9 +119,7 @@ class EngineDownloadThread(QThread):
             with zipfile.ZipFile(vdf_zip, 'r') as zip_ref:
                 zip_ref.extractall(self.extract_dir)
             os.remove(vdf_zip)
-            self.log_msg.emit(f"  └─ Success! Removed temp zip: {vdf_zip}")
 
-            # --- 2. DOWNLOAD FFMPEG ---
             ffmpeg_zip = os.path.join(self.extract_dir, "ffmpeg.zip")
             if not self._download_file(self.ffmpeg_url, ffmpeg_zip, "Downloading FFmpeg... (Large File)"): return
 
@@ -141,7 +137,6 @@ class EngineDownloadThread(QThread):
                         with source, target:
                             shutil.copyfileobj(source, target)
             os.remove(ffmpeg_zip)
-            self.log_msg.emit(f"  └─ Success! Removed temp zip: {ffmpeg_zip}")
 
             self.status.emit("Cleaning up...")
             self.log_msg.emit("> [SYSTEM] Installation routine completed successfully.")
@@ -160,22 +155,20 @@ class VideoDedupTab(QWidget):
         super().__init__()
         self.settings_dialog = settings_dialog
         
-        # CLI Process
         self.vdf_process = QProcess()
         self.vdf_process.readyReadStandardOutput.connect(self.handle_stdout)
         self.vdf_process.readyReadStandardError.connect(self.handle_stderr)
         self.vdf_process.finished.connect(self.process_finished)
                 
-        # 🔹 PATH RESOLUTION 🔹
         if getattr(sys, 'frozen', False):
-            app_dir = os.path.dirname(sys.executable)
+            base_dir = os.path.dirname(sys.executable)
         else:
-            app_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            base_dir = os.path.abspath(".") 
             
-        self.engine_dir = os.path.join(app_dir, "Engine", "VideoDuplicateFinder")
+        self.engine_dir = os.path.join(base_dir, "Engine", "VideoDuplicateFinder")
         self.cli_path = os.path.join(self.engine_dir, "vdf-cli.exe")
         self.ffmpeg_path = os.path.join(self.engine_dir, "ffmpeg.exe") 
-        self.output_json_path = "" 
+        self.output_json_path = os.path.join(base_dir, "vdf_results.json") 
         
         self.thumb_worker = ThumbnailWorker(self.ffmpeg_path)
         self.thumb_worker.result_ready.connect(self.apply_thumbnail)
@@ -186,7 +179,6 @@ class VideoDedupTab(QWidget):
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
 
-        # 1. TOP CONTROL PANEL
         top_panel = QFrame()
         top_panel.setStyleSheet("background-color: #252526; border-radius: 8px; border: 1px solid #3e3e42;")
         top_panel.setMaximumHeight(110) 
@@ -213,7 +205,7 @@ class VideoDedupTab(QWidget):
 
         action_row = QHBoxLayout()
         
-        self.btn_scan = QPushButton("🎬 Start Video Scan")
+        self.btn_scan = QPushButton("Start Video Scan")
         self.btn_scan.setFixedSize(170, 32)
         self.btn_scan.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_scan.setStyleSheet("""
@@ -222,7 +214,7 @@ class VideoDedupTab(QWidget):
         """)
         self.btn_scan.clicked.connect(self.start_cli_scan)
         
-        self.btn_download = QPushButton("📥 Download VDF Engine")
+        self.btn_download = QPushButton("Download VDF Engine")
         self.btn_download.setFixedSize(190, 32)
         self.btn_download.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_download.setStyleSheet("""
@@ -255,10 +247,8 @@ class VideoDedupTab(QWidget):
 
         main_layout.addWidget(top_panel, 0) 
 
-        # 2. SPLIT VIEW
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # LEFT: Scroll Area
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setStyleSheet("QScrollArea { background-color: #1e1e1e; border: 1px solid #3e3e42; border-radius: 4px; }")
@@ -269,15 +259,13 @@ class VideoDedupTab(QWidget):
         self.scroll_area.setWidget(self.content_widget)
         splitter.addWidget(self.scroll_area)
 
-        # RIGHT: Preview & Logs
         right_panel = QSplitter(Qt.Orientation.Vertical)
         
-        # -- VIDEO PLAYER UI --
         self.preview_frame = QFrame()
         self.preview_frame.setStyleSheet("background-color: #252526; border: 1px solid #3e3e42; border-radius: 4px;")
         preview_layout = QVBoxLayout(self.preview_frame)
         
-        self.lbl_preview_title = QLabel("🔍 Video Player (Click a video to play)")
+        self.lbl_preview_title = QLabel("Video Player (Click a video to play)")
         self.lbl_preview_title.setStyleSheet("font-weight: bold; font-size: 14px; color: #ffffff; border: none;")
         preview_layout.addWidget(self.lbl_preview_title)
         
@@ -294,13 +282,20 @@ class VideoDedupTab(QWidget):
         controls_layout = QHBoxLayout()
         controls_layout.setContentsMargins(5, 5, 5, 5)
         
-        self.btn_play = QPushButton("▶️ Play")
-        self.btn_play.setStyleSheet("background-color: #3e3e42; color: white; border-radius: 4px; padding: 5px 12px; font-weight: bold;")
-        self.btn_play.clicked.connect(self.media_player.play)
+        self.btn_skip_back = QPushButton()
+        self.btn_skip_back.setIcon(QIcon(os.path.join("assets", "Svg", "back 10Sec.svg")))
+        self.btn_skip_back.setStyleSheet("background-color: #3e3e42; border-radius: 4px; padding: 5px 12px;")
+        self.btn_skip_back.clicked.connect(lambda: self.media_player.setPosition(self.media_player.position() - 10000))
         
-        self.btn_pause = QPushButton("⏸️ Pause")
-        self.btn_pause.setStyleSheet("background-color: #3e3e42; color: white; border-radius: 4px; padding: 5px 12px; font-weight: bold;")
-        self.btn_pause.clicked.connect(self.media_player.pause)
+        self.btn_play_pause = QPushButton()
+        self.btn_play_pause.setIcon(QIcon(os.path.join("assets", "Svg", "play.svg")))
+        self.btn_play_pause.setStyleSheet("background-color: #3e3e42; border-radius: 4px; padding: 5px 12px;")
+        self.btn_play_pause.clicked.connect(self.toggle_play_pause)
+        
+        self.btn_skip_forward = QPushButton()
+        self.btn_skip_forward.setIcon(QIcon(os.path.join("assets", "Svg", "skip 10Sec.svg")))
+        self.btn_skip_forward.setStyleSheet("background-color: #3e3e42; border-radius: 4px; padding: 5px 12px;")
+        self.btn_skip_forward.clicked.connect(lambda: self.media_player.setPosition(self.media_player.position() + 10000))
 
         self.time_slider = QSlider(Qt.Orientation.Horizontal)
         self.time_slider.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -314,8 +309,9 @@ class VideoDedupTab(QWidget):
         self.lbl_time = QLabel("00:00 / 00:00")
         self.lbl_time.setStyleSheet("color: #cccccc; font-size: 12px; font-weight: bold; font-family: Consolas;")
 
-        controls_layout.addWidget(self.btn_play)
-        controls_layout.addWidget(self.btn_pause)
+        controls_layout.addWidget(self.btn_skip_back)
+        controls_layout.addWidget(self.btn_play_pause)
+        controls_layout.addWidget(self.btn_skip_forward)
         controls_layout.addWidget(self.time_slider, stretch=1)
         controls_layout.addWidget(self.lbl_time)
         
@@ -323,11 +319,11 @@ class VideoDedupTab(QWidget):
 
         self.media_player.positionChanged.connect(self.on_position_changed)
         self.media_player.durationChanged.connect(self.on_duration_changed)
+        self.media_player.playbackStateChanged.connect(self.on_playback_state_changed)
         self.time_slider.sliderMoved.connect(self.media_player.setPosition)
 
         right_panel.addWidget(self.preview_frame)
 
-        # -- LOGS --
         self.log_console = QTextEdit()
         self.log_console.setReadOnly(True)
         self.log_console.setStyleSheet("background-color: #0c0c0c; color: #cccccc; border: 1px solid #3e3e42; padding: 8px; border-radius: 4px; font-family: Consolas;")
@@ -338,6 +334,117 @@ class VideoDedupTab(QWidget):
         splitter.addWidget(right_panel)
         main_layout.addWidget(splitter, 1)
 
+        self.load_cached_results()
+
+    # ==========================================
+    # 🔹 INSTANT RESUME & CACHE MANAGEMENT 🔹
+    # ==========================================
+    def filter_ignored_vdf_groups(self, groups):
+        if not groups: return groups, False
+        
+        db_folder = self.settings_dialog.db_path_input.text().strip()
+        db_file = os.path.join(db_folder, "library.db")
+        if not os.path.exists(db_file): return groups, False
+        
+        try:
+            conn = sqlite3.connect(db_file)
+            cursor = conn.cursor()
+            
+            cursor.execute("CREATE TABLE IF NOT EXISTS IgnoredPairs (hash1 TEXT, hash2 TEXT, PRIMARY KEY (hash1, hash2))")
+            cursor.execute("SELECT hash1, hash2 FROM IgnoredPairs")
+            ignored_set = {tuple(sorted((row[0], row[1]))) for row in cursor.fetchall()}
+            
+            if not ignored_set:
+                conn.close()
+                return groups, False
+
+            all_paths = set()
+            for g in groups:
+                for item in g.get("Items", []):
+                    all_paths.add(item["Path"])
+            
+            path_to_hash = {}
+            cursor.execute("SELECT file_path, hash FROM Images")
+            for p, h in cursor.fetchall():
+                if p in all_paths: path_to_hash[p] = h
+            conn.close()
+            
+            valid_groups = []
+            changes_made = False
+            
+            for group in groups:
+                items = group.get("Items", [])
+                valid_items = []
+                
+                for item in items:
+                    h1 = path_to_hash.get(item["Path"])
+                    can_add = True
+                    if h1:
+                        for v_item in valid_items:
+                            h2 = path_to_hash.get(v_item["Path"])
+                            if h2 and tuple(sorted((h1, h2))) in ignored_set:
+                                can_add = False
+                                break
+                    
+                    if can_add:
+                        valid_items.append(item)
+                    else:
+                        changes_made = True
+                        
+                if len(valid_items) > 1:
+                    if len(valid_items) != len(items):
+                        group["Items"] = valid_items
+                    valid_groups.append(group)
+                else:
+                    changes_made = True
+                    
+            return valid_groups, changes_made
+            
+        except Exception as e:
+            self.log_console.append(f"> Filter Error: {e}")
+            return groups, False
+
+    def load_cached_results(self):
+        if not os.path.exists(self.output_json_path):
+            return
+
+        try:
+            with open(self.output_json_path, 'r', encoding='utf-8') as f:
+                groups = json.load(f)
+
+            if not groups:
+                return
+
+            valid_groups = []
+            changes_made = False
+
+            for group in groups:
+                valid_items = []
+                for item in group.get("Items", []):
+                    if os.path.exists(item["Path"]):
+                        valid_items.append(item)
+                    else:
+                        changes_made = True 
+
+                if len(valid_items) > 1:
+                    group["Items"] = valid_items
+                    valid_groups.append(group)
+                else:
+                    changes_made = True
+
+            valid_groups, filter_changed = self.filter_ignored_vdf_groups(valid_groups)
+
+            if changes_made or filter_changed:
+                with open(self.output_json_path, 'w', encoding='utf-8') as f:
+                    json.dump(valid_groups, f, indent=4)
+
+            if valid_groups:
+                self.log_console.append(f"> Fast Resume: Loaded {len(valid_groups)} duplicate groups from cache.")
+                self.lbl_status.setText(f"Found {len(valid_groups)} exact duplicate groups (Cached).")
+                self.render_video_groups(valid_groups)
+                
+        except Exception as e:
+            self.log_console.append(f"> Cache Load Error: {e}")
 
     # ==========================================
     # 📥 ENGINE DOWNLOAD LOGIC
@@ -364,11 +471,11 @@ class VideoDedupTab(QWidget):
         self.btn_scan.setEnabled(True)
         
         if success:
-            self.lbl_status.setText("✅ Engine Installed Successfully!")
+            self.lbl_status.setText("Engine Installed Successfully!")
             self.btn_download.hide()
             QMessageBox.information(self, "Download Complete", "The Video Duplicate Finder engine has been successfully installed and is ready to use!")
         else:
-            self.lbl_status.setText("❌ Download Failed.")
+            self.lbl_status.setText("Download Failed.")
             QMessageBox.critical(self, "Download Error", f"Failed to download the engine:\n{msg}")
 
 
@@ -380,6 +487,18 @@ class VideoDedupTab(QWidget):
         self.lbl_preview_title.setText(f"▶️ Playing: {os.path.basename(file_path)}")
         self.media_player.setSource(QUrl.fromLocalFile(file_path))
         self.media_player.play()
+
+    def toggle_play_pause(self):
+        if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.media_player.pause()
+        else:
+            self.media_player.play()
+
+    def on_playback_state_changed(self, state):
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            self.btn_play_pause.setIcon(QIcon(os.path.join("assets", "Svg", "pause.svg")))
+        else:
+            self.btn_play_pause.setIcon(QIcon(os.path.join("assets", "Svg", "play.svg")))
 
     def on_position_changed(self, position):
         self.time_slider.blockSignals(True)
@@ -416,8 +535,6 @@ class VideoDedupTab(QWidget):
         if not os.path.exists(db_file):
             QMessageBox.critical(self, "Error", "Could not find library.db.")
             return
-            
-        self.output_json_path = os.path.join(db_folder, "vdf_results.json")
 
         conn = sqlite3.connect(db_file)
         cursor = conn.cursor()
@@ -433,28 +550,35 @@ class VideoDedupTab(QWidget):
         video_files = [f for f in all_files if os.path.splitext(f)[1].lower() in video_exts]
 
         if not video_files:
-            self.lbl_status.setText("✅ No videos found in database!")
+            self.lbl_status.setText("No videos found in database!")
             return
 
-        drive_groups = defaultdict(list)
+        unique_folders = set()
         for path in video_files:
             if os.path.exists(path):
-                directory = os.path.dirname(path)
-                drive = os.path.splitdrive(directory)[0]
-                drive_groups[drive].append(directory)
+                unique_folders.add(os.path.dirname(path))
 
-        include_folders = []
-        for drive, dir_paths in drive_groups.items():
-            common_root = os.path.commonpath(dir_paths)
-            include_folders.append(common_root)
+        if len(unique_folders) > 75:
+            drive_groups = defaultdict(list)
+            for folder in unique_folders:
+                drive = os.path.splitdrive(folder)[0]
+                drive_groups[drive].append(folder)
+                
+            include_folders = []
+            for drive, dir_paths in drive_groups.items():
+                include_folders.append(os.path.commonpath(dir_paths))
+        else:
+            include_folders = list(unique_folders)
 
         if os.path.exists(self.output_json_path):
             try: os.remove(self.output_json_path)
             except: pass
 
         engine_folder = os.path.dirname(self.cli_path)
+        
         try:
             subprocess.run(["taskkill", "/F", "/IM", "vdf-cli.exe"], capture_output=True, creationflags=0x08000000)
+            subprocess.run(["taskkill", "/F", "/IM", "ffmpeg.exe"], capture_output=True, creationflags=0x08000000)
         except Exception:
             pass 
 
@@ -462,8 +586,10 @@ class VideoDedupTab(QWidget):
         cache_db2 = os.path.join(engine_folder, "ScannedFiles_new.db")
         for cache_file in [cache_db1, cache_db2]:
             if os.path.exists(cache_file):
-                try: os.remove(cache_file)
-                except Exception: pass
+                try: 
+                    os.remove(cache_file)
+                except Exception as e: 
+                    self.log_console.append(f"> WARNING: Could not delete cache file! It may be locked. ({e})")
 
         args = [
             "scan-and-compare", "--output", self.output_json_path,
@@ -476,12 +602,13 @@ class VideoDedupTab(QWidget):
         self.lbl_status.setText("⏳ Scanning... Please wait.")
         self.log_console.clear()
         
-        # 🔹 DETAILED SCAN LOGGING 🔹
+        self.dl_progress.setValue(0)
+        self.dl_progress.show()
+        
         self.log_console.append("=========================================")
-        self.log_console.append("🎥 VIDEO DEDUPLICATION SCAN INITIATED")
+        self.log_console.append("VIDEO DEDUPLICATION SCAN INITIATED")
         self.log_console.append("=========================================")
         self.log_console.append(f"> Target Database: {db_file}")
-        self.log_console.append(f"> VDF Engine Path: {self.cli_path}")
         self.log_console.append(f"> Result Output File: {self.output_json_path}")
         self.log_console.append(f"> Total videos queued for analysis: {len(video_files)}")
         self.log_console.append(">")
@@ -498,18 +625,41 @@ class VideoDedupTab(QWidget):
     def handle_stdout(self):
         out_data = self.vdf_process.readAllStandardOutput().data().decode(errors='replace')
         lines = out_data.replace('\r', '\n').split('\n')
+        
         for line in lines:
             line = line.strip()
-            if not line or "ETA " in line or "%]" in line: continue
+            if not line: continue
+            
+            if "%" in line:
+                match = re.search(r'(\d+(?:\.\d+)?)%', line)
+                if match:
+                    percent = float(match.group(1))
+                    self.dl_progress.setValue(int(percent))
+                    self.lbl_status.setText(f"⏳ Scanning... {percent:.1f}%")
+                
+                if "ETA" in line or "]" in line:
+                    continue
+                    
             self.log_console.append(line)
             self.log_console.verticalScrollBar().setValue(self.log_console.verticalScrollBar().maximum())
 
     def handle_stderr(self):
         err_data = self.vdf_process.readAllStandardError().data().decode(errors='replace')
         lines = err_data.replace('\r', '\n').split('\n')
+        
         for line in lines:
             line = line.strip()
-            if not line or "ETA " in line or "%]" in line: continue
+            if not line: continue
+            
+            if "%" in line:
+                match = re.search(r'(\d+(?:\.\d+)?)%', line)
+                if match:
+                    percent = float(match.group(1))
+                    self.dl_progress.setValue(int(percent))
+                    self.lbl_status.setText(f"⏳ Scanning... {percent:.1f}%")
+                
+                if "ETA" in line or "]" in line:
+                    continue
             
             crash_keywords = ["Unhandled exception", "System.IO.IOException", "ScannedFiles_new.db", "at System.", "at VDF.", "at Microsoft."]
             if any(keyword in line for keyword in crash_keywords): continue
@@ -519,12 +669,14 @@ class VideoDedupTab(QWidget):
 
     def process_finished(self, exit_code, exit_status):
         self.btn_scan.setEnabled(True)
+        self.dl_progress.hide()
+        
         if os.path.exists(self.output_json_path):
-            self.lbl_status.setText("✅ Scan Complete! Processing results...")
+            self.lbl_status.setText("Scan Complete! Processing results...")
             self.log_console.append("\n> Scan Complete! Parsing JSON results...")
             self.parse_vdf_results()
         else:
-            self.lbl_status.setText("❌ Scan Failed.")
+            self.lbl_status.setText("Scan Failed.")
             self.log_console.append(f"\n> [CRITICAL] Engine failed to write JSON. (Exit code {exit_code})")
 
     # ==========================================
@@ -538,13 +690,19 @@ class VideoDedupTab(QWidget):
             with open(self.output_json_path, 'r', encoding='utf-8') as f:
                 groups = json.load(f)
                 
+            groups, filter_changed = self.filter_ignored_vdf_groups(groups)
+            
+            if filter_changed:
+                with open(self.output_json_path, 'w', encoding='utf-8') as f:
+                    json.dump(groups, f, indent=4)
+                
             if not groups:
-                self.lbl_status.setText("✅ Library is clean! No exact copies found.")
+                self.lbl_status.setText("Library is clean! No exact copies found.")
                 self.render_video_groups([])
                 return
 
             self.log_console.append(f"> Found {len(groups)} duplicate groups. Rendering UI...")
-            self.lbl_status.setText(f"⚠️ Found {len(groups)} exact duplicate groups.")
+            self.lbl_status.setText(f"Found {len(groups)} exact duplicate groups.")
             self.render_video_groups(groups)
             
         except Exception as e:
@@ -574,15 +732,27 @@ class VideoDedupTab(QWidget):
             group_card.setStyleSheet("background-color: #2d2d30; border-radius: 8px; border: 1px solid #3e3e42; margin-bottom: 15px;")
             card_layout = QVBoxLayout(group_card)
             
-            header = QLabel(f"🎬 Exact Duplicate Group #{i+1} ({len(items)} videos)")
+            header_layout = QHBoxLayout()
+            header = QLabel(f"Exact Duplicate Group #{i+1} ({len(items)} videos)")
             header.setStyleSheet("font-weight: bold; color: #ffffff; border: none; font-size: 14px; padding-bottom: 5px;")
-            card_layout.addWidget(header)
+            
+            btn_ignore = QPushButton("Mark as 'Not Duplicates'")
+            btn_ignore.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_ignore.setStyleSheet("QPushButton { background-color: transparent; border: 1px solid #3fb950; color: #3fb950; padding: 4px 10px; border-radius: 4px; font-weight: bold; } QPushButton:hover { background-color: rgba(63, 185, 80, 0.1); }")
+            
+            header_layout.addWidget(header)
+            header_layout.addStretch()
+            header_layout.addWidget(btn_ignore)
+            card_layout.addLayout(header_layout)
 
             videos_container = QWidget()
             videos_container.setStyleSheet("background: transparent; border: none;") 
             videos_layout = QHBoxLayout(videos_container)
             videos_layout.setContentsMargins(0,0,0,0)
             videos_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+
+            has_checkboxes = len(items) >= 3
+            checkbox_refs = []
 
             for vid in items:
                 v_path = vid["Path"]
@@ -614,10 +784,20 @@ class VideoDedupTab(QWidget):
                 
                 self.thumb_worker.add_task(v_path, dur_sec)
 
+                v_layout.addWidget(lbl_thumb)
+                
+                if has_checkboxes:
+                    cb = QCheckBox("Select Exception")
+                    cb.setCursor(Qt.CursorShape.PointingHandCursor)
+                    cb.setProperty("file_path", v_path)
+                    cb.setStyleSheet("color: white; padding-top: 2px;")
+                    checkbox_refs.append(cb)
+                    v_layout.addWidget(cb)
+
                 info_text = (
                     f"<b style='color: white;'>{v_name[:25]}...</b><br>"
                     f"<span style='color: #a0a0a0; font-size: 10px;'>"
-                    f"📐 {vid.get('FrameSize','N/A')} | 💾 {vid.get('Size','N/A')}<br>"
+                    f"{vid.get('FrameSize','N/A')} | {vid.get('Size','N/A')}<br>"
                     f"⏱️ {vid.get('Duration','N/A')}"
                     f"</span>"
                 )
@@ -625,36 +805,129 @@ class VideoDedupTab(QWidget):
                 lbl_info.setWordWrap(True)
                 lbl_info.setStyleSheet("border: none; margin-top: 5px;")
 
-                btn_del = QPushButton("🗑️ Recycle Bin")
-                btn_del.setFixedHeight(30)
+                # 🔹 FIX: Added thicker padding and removed fixed height
+                btn_del = QPushButton("Recycle Bin")
                 btn_del.setStyleSheet("""
-                    QPushButton { background-color: #a31515; color: white; border-radius: 4px; font-weight: bold; border: none; }
+                    QPushButton { background-color: #a31515; color: white; border-radius: 4px; padding: 8px 12px; font-weight: bold; border: none; }
                     QPushButton:hover { background-color: #d13438; }
                 """)
-                btn_del.clicked.connect(lambda checked, p=v_path, w=vid_widget: self.delete_video_duplicate(p, w))
+                # 🔹 FIX: Now we pass the group_card and the layout so the delete function knows how many videos are left
+                btn_del.clicked.connect(lambda checked, p=v_path, w=vid_widget, gc=group_card, vl=videos_layout: self.delete_video_duplicate(p, w, gc, vl))
 
-                v_layout.addWidget(lbl_thumb)
                 v_layout.addWidget(lbl_info)
                 v_layout.addWidget(btn_del)
                 videos_layout.addWidget(vid_widget)
 
             card_layout.addWidget(videos_container)
             self.content_layout.addWidget(group_card)
+            
+            btn_ignore.clicked.connect(lambda checked, gc=group_card, g_items=items, cbs=checkbox_refs: self.mark_not_duplicates(gc, g_items, cbs))
 
-    def delete_video_duplicate(self, file_path, widget_to_remove):
+    # ==========================================
+    # 🔹 EXCEPTION MANAGER (MARK NOT DUPLICATES)
+    # ==========================================
+    def mark_not_duplicates(self, group_card, group_items, checkboxes):
+        db_folder = self.settings_dialog.db_path_input.text().strip()
+        db_file = os.path.join(db_folder, "library.db")
+        if not os.path.exists(db_file): return
+
+        conn = sqlite3.connect(db_file)
+        cursor = conn.cursor()
+
+        path_to_hash = {}
+        for item in group_items:
+            path = item['Path']
+            cursor.execute("SELECT hash FROM Images WHERE file_path = ?", (path,))
+            res = cursor.fetchone()
+            if res: 
+                path_to_hash[path] = res[0]
+            else:
+                cursor.execute("SELECT hash FROM tagless WHERE file_path = ?", (path,))
+                res = cursor.fetchone()
+                if res: path_to_hash[path] = res[0]
+
+        all_paths = [item['Path'] for item in group_items if item['Path'] in path_to_hash]
+        if len(all_paths) < 2:
+            conn.close()
+            return 
+
+        pairs_to_ignore = []
+
+        if not checkboxes:
+            h1 = path_to_hash[all_paths[0]]
+            h2 = path_to_hash[all_paths[1]]
+            pairs_to_ignore.append(tuple(sorted((h1, h2))))
+        else:
+            selected_paths = []
+            for cb in checkboxes:
+                try:
+                    if cb.isChecked():
+                        selected_paths.append(cb.property("file_path"))
+                except RuntimeError:
+                    continue # 🔹 FIX: Safely skip deleted C++ objects to prevent crashing
+            
+            if not selected_paths:
+                QMessageBox.warning(self, "Selection Required", "Please check the box next to the video(s) that are not duplicates.")
+                conn.close()
+                return
+                
+            for sel_path in selected_paths:
+                if sel_path not in path_to_hash: continue
+                sel_hash = path_to_hash[sel_path]
+                for other_path in all_paths:
+                    if sel_path != other_path and other_path in path_to_hash:
+                        other_hash = path_to_hash[other_path]
+                        pairs_to_ignore.append(tuple(sorted((sel_hash, other_hash))))
+
+        cursor.execute("CREATE TABLE IF NOT EXISTS IgnoredPairs (hash1 TEXT, hash2 TEXT, PRIMARY KEY (hash1, hash2))")
+        for h1, h2 in set(pairs_to_ignore):
+            cursor.execute("INSERT OR IGNORE INTO IgnoredPairs (hash1, hash2) VALUES (?, ?)", (h1, h2))
+            
+        conn.commit()
+        conn.close()
+
+        if os.path.exists(self.output_json_path):
+            try:
+                with open(self.output_json_path, 'r', encoding='utf-8') as f:
+                    groups = json.load(f)
+                
+                for group in groups:
+                    group_paths = [img["Path"] for img in group.get("Items", [])]
+                    if all(p in group_paths for p in [i['Path'] for i in group_items]):
+                        if not checkboxes:
+                            group["Items"] = [] 
+                        else:
+                            group["Items"] = [img for img in group["Items"] if img["Path"] not in selected_paths]
+                
+                groups = [g for g in groups if len(g.get("Items", [])) > 1]
+                
+                with open(self.output_json_path, 'w', encoding='utf-8') as f:
+                    json.dump(groups, f, indent=4)
+            except Exception as e:
+                self.log_console.append(f"> Live Pruning Error: {e}")
+
+        group_card.setParent(None)
+        group_card.deleteLater()
+        self.log_console.append("> Exception saved. These videos will be ignored in all future scans.")
+
+    # 🔹 FIX: Updated signature to accept group_card and videos_layout for auto-pruning
+    def delete_video_duplicate(self, file_path, widget_to_remove, group_card, videos_layout):
         reply = QMessageBox.question(self, "Confirm Delete", f"Move this video to the Recycle Bin?\n\n{os.path.basename(file_path)}", 
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         
         if reply == QMessageBox.StandardButton.Yes:
             try:
+                # 1. Stop Player
                 if self.media_player.source().toLocalFile() == file_path:
                     self.media_player.stop()
                     self.media_player.setSource(QUrl())
-                    self.lbl_preview_title.setText("🔍 Video Player (Click a video to play)")
+                    self.lbl_preview_title.setText("Video Player (Click a video to play)")
 
+                # 2. Delete File
                 if os.path.exists(file_path): 
                     send2trash(file_path)
                 
+                # 3. Delete from Main Database
                 db_folder = self.settings_dialog.db_path_input.text().strip()
                 db_file = os.path.join(db_folder, "library.db")
                 if os.path.exists(db_file):
@@ -663,9 +936,31 @@ class VideoDedupTab(QWidget):
                     cursor.execute("DELETE FROM Images WHERE file_path = ?", (file_path,))
                     conn.commit()
                     conn.close()
+
+                # 4. LIVE JSON PRUNING
+                if os.path.exists(self.output_json_path):
+                    with open(self.output_json_path, 'r', encoding='utf-8') as f:
+                        groups = json.load(f)
+                        
+                    for group in groups:
+                        group["Items"] = [item for item in group.get("Items", []) if item["Path"] != file_path]
+                        
+                    groups = [g for g in groups if len(g.get("Items", [])) > 1]
+                    
+                    with open(self.output_json_path, 'w', encoding='utf-8') as f:
+                        json.dump(groups, f, indent=4)
                 
+                # 5. Update UI
                 widget_to_remove.setParent(None)
                 widget_to_remove.deleteLater()
+                
+                # 🔹 FIX: Count how many active videos are left. If 1 or 0, destroy the group card!
+                active_count = sum(1 for i in range(videos_layout.count()) if videos_layout.itemAt(i).widget() is not None)
+                if active_count <= 1:
+                    group_card.setParent(None)
+                    group_card.deleteLater()
+                    self.log_console.append("> Only 1 file remaining. Group resolved and removed from view.")
+                
                 self.log_console.append(f"> Deleted: {os.path.basename(file_path)}")
                 
             except Exception as e:

@@ -1,7 +1,7 @@
 import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTreeView, 
                              QSplitter, QLabel, QPushButton, QScrollArea, QFrame, 
-                             QSlider, QStyle, QLineEdit, QScrollBar)
+                             QSlider, QStyle, QLineEdit, QScrollBar, QSizePolicy)
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QMouseEvent, QPixmap, QIcon
 from PyQt6.QtMultimediaWidgets import QVideoWidget
@@ -9,7 +9,7 @@ from PyQt6.QtCore import pyqtSignal
 
 # Import our custom Gallery
 from Src.Ui.gallery import GallerySection
-from Src.Ui.reader_widget import ManhwaReaderWidget
+from Src.Ui.reader_widget import ManhwaReaderWidget, MangaReaderWidget
 from Src.Logic.paths import resource_path
 # --- CUSTOM SLIDER ---
 class JumpSlider(QSlider):
@@ -38,6 +38,170 @@ class CustomVideoWidget(QVideoWidget):
 
         else:
             super().keyPressEvent(event)
+
+class DynamicImageLabel(QLabel):
+    """A smart label that natively recalculates image/GIF scale during ANY UI resize (like dragging splitters)."""
+    def __init__(self):
+        super().__init__()
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # 🔹 This is the magic line that lets it shrink and expand freely when splitters are dragged
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self._raw_pixmap = None
+        self.is_zoomed = False
+        self.update_cursor()
+
+    def update_cursor(self):
+        from PyQt6.QtGui import QCursor, QPixmap
+        import os
+        if self.is_zoomed:
+            pm = QPixmap(os.path.join("assets", "uisvg", "zoom_out.svg"))
+            self.setCursor(QCursor(pm))
+        else:
+            pm = QPixmap(os.path.join("assets", "uisvg", "zoom_in.svg"))
+            self.setCursor(QCursor(pm))
+
+    def clear(self):
+        self._raw_pixmap = None
+        self.is_zoomed = False
+        self.setMinimumSize(0, 0)
+        self.setMaximumSize(16777215, 16777215)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        super().clear()
+        self.update_cursor()
+
+    def set_raw_pixmap(self, pixmap):
+        self._raw_pixmap = pixmap
+        self.is_zoomed = False
+        self.setMinimumSize(0, 0)
+        self.setMaximumSize(16777215, 16777215)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self._scale_content()
+        self.update_cursor()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if not self.is_zoomed:
+            self._scale_content()
+
+    def _scale_content(self):
+        if self.is_zoomed:
+            return
+            
+        avail_w = self.width()
+        avail_h = self.height()
+        
+        if avail_w <= 0 or avail_h <= 0:
+            return
+
+        # 1. Handle Static Images
+        if self._raw_pixmap and not self._raw_pixmap.isNull():
+            scaled = self._raw_pixmap.scaled(
+                avail_w, avail_h, 
+                Qt.AspectRatioMode.KeepAspectRatio, 
+                Qt.TransformationMode.SmoothTransformation
+            )
+            super().setPixmap(scaled) 
+            
+        # 2. Handle Animated GIFs
+        elif self.movie() and self.movie().isValid():
+            orig_size = self.movie().currentImage().size()
+            if not orig_size.isEmpty():
+                ratio = min(avail_w / max(orig_size.width(), 1), avail_h / max(orig_size.height(), 1))
+                new_w = int(orig_size.width() * ratio)
+                new_h = int(orig_size.height() * ratio)
+                self.movie().setScaledSize(QSize(new_w, new_h))
+
+    def get_scroll_area(self):
+        parent = self.parentWidget()
+        while parent:
+            if isinstance(parent, QScrollArea):
+                return parent
+            parent = parent.parentWidget()
+        return None
+
+    def mouseDoubleClickEvent(self, event):
+        if not self._raw_pixmap or self._raw_pixmap.isNull():
+            return
+            
+        scroll_area = self.get_scroll_area()
+        if not scroll_area:
+            return
+
+        if not self.is_zoomed:
+            # We are zooming IN.
+            drawn_pixmap = self.pixmap()
+            if not drawn_pixmap: return
+            
+            drawn_w = drawn_pixmap.width()
+            drawn_h = drawn_pixmap.height()
+            
+            # Find top-left of the drawn image
+            offset_x = (self.width() - drawn_w) / 2.0
+            offset_y = (self.height() - drawn_h) / 2.0
+            
+            click_x = event.position().x()
+            click_y = event.position().y()
+            
+            # Prevent zooming if clicked on the black borders
+            if click_x < offset_x or click_x > offset_x + drawn_w or click_y < offset_y or click_y > offset_y + drawn_h:
+                return 
+                
+            prop_x = (click_x - offset_x) / drawn_w
+            prop_y = (click_y - offset_y) / drawn_h
+            
+            self.is_zoomed = True
+            
+            raw_w = self._raw_pixmap.width()
+            raw_h = self._raw_pixmap.height()
+            
+            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            self.setMinimumSize(raw_w, raw_h)
+            self.setMaximumSize(16777215, 16777215)
+            super().setPixmap(self._raw_pixmap)
+            
+            def apply_scroll():
+                from PyQt6.QtCore import QPoint
+                content_widget = scroll_area.widget()
+                if not content_widget:
+                    return
+                    
+                new_offset_x = max(0, (self.width() - raw_w) / 2.0)
+                new_offset_y = max(0, (self.height() - raw_h) / 2.0)
+                
+                target_x = int(new_offset_x + prop_x * raw_w)
+                target_y = int(new_offset_y + prop_y * raw_h)
+                
+                target_pt = self.mapTo(content_widget, QPoint(target_x, target_y))
+                
+                viewport_w = scroll_area.viewport().width()
+                viewport_h = scroll_area.viewport().height()
+                
+                scroll_area.horizontalScrollBar().setValue(int(target_pt.x() - viewport_w / 2.0))
+                scroll_area.verticalScrollBar().setValue(int(target_pt.y() - viewport_h / 2.0))
+            
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(50, apply_scroll)
+            self.update_cursor()
+            
+        else:
+            # We are zooming OUT.
+            self.is_zoomed = False
+            self.setMinimumSize(0, 0)
+            self.setMaximumSize(16777215, 16777215)
+            self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+            self._scale_content()
+            self.update_cursor()
+
+    def wheelEvent(self, event):
+        from PyQt6.QtCore import Qt
+        scroll_area = self.get_scroll_area()
+        if scroll_area and self.is_zoomed and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            h_bar = scroll_area.horizontalScrollBar()
+            # angleDelta().y() is positive for scrolling up. Going up = scrolling left (decreasing value).
+            h_bar.setValue(h_bar.value() - event.angleDelta().y())
+            event.accept()
+        else:
+            super().wheelEvent(event)
 
 class VideoContainer(QWidget):
     def __init__(self, main_window):
@@ -305,7 +469,9 @@ class MainWindowUI:
         """)
 
         # --- Change DB Folder Button ---
-        self.btn_change_db = QPushButton("⚙️")
+        self.btn_change_db = QPushButton()
+        self.btn_change_db.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "settings.svg"))))
+        self.btn_change_db.setIconSize(QSize(24, 24))
         self.btn_change_db.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_change_db.setFixedSize(45, 45) 
         self.btn_change_db.setToolTip("Change Database Folder")
@@ -436,14 +602,18 @@ class MainWindowUI:
         self.viewer_stack_layout.setContentsMargins(0,0,0,0)
 
         # Standard Viewer (For GIFs and single images)
-        self.lbl_image = QLabel()
-        self.lbl_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_image = DynamicImageLabel() # 👈 Use our new smart label!
         self.viewer_stack_layout.addWidget(self.lbl_image)
 
         # High-Performance Virtual Reader (For folders)
         self.manhwa_reader = ManhwaReaderWidget(self.scroll_area)
         self.viewer_stack_layout.addWidget(self.manhwa_reader)
         self.manhwa_reader.hide() # Hidden by default
+        
+        # Classic Manga Reader
+        self.manga_reader = MangaReaderWidget()
+        self.viewer_stack_layout.addWidget(self.manga_reader)
+        self.manga_reader.hide() # Hidden by default
 
         self.scroll_area.setWidget(self.viewer_stack_widget)
 

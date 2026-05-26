@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt, QSettings
 class FirstTimeSetupDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("🚀 Welcome to Media Nest Setup")
+        self.setWindowTitle("Welcome to Media Nest Setup")
         self.setMinimumWidth(600)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self.setup_ui()
@@ -39,21 +39,31 @@ class FirstTimeSetupDialog(QDialog):
         info_layout = QVBoxLayout(info_frame)
         info_layout.setSpacing(10)
 
-        info_text = """
-        <h3 style='color: #ffffff; margin-bottom: 2px;'>🗄️ How the Databases Work</h3>
+        if getattr(sys, 'frozen', False):
+            import sys as _sys
+            base_dir = getattr(_sys, '_MEIPASS', os.path.abspath("."))
+        else:
+            base_dir = os.path.abspath(".")
+            
+        svg_db = os.path.join(base_dir, "assets", "uisvg", "database.svg").replace("\\", "/")
+        svg_tag = os.path.join(base_dir, "assets", "uisvg", "tag.svg").replace("\\", "/")
+        svg_tools = os.path.join(base_dir, "assets", "uisvg", "tools.svg").replace("\\", "/")
+
+        info_text = f"""
+        <h3 style='color: #ffffff; margin-bottom: 2px;'><img src='{svg_db}' width='16' height='16'> How the Databases Work</h3>
         <ul style='margin-top: 0px;'>
             <li><b>library.db:</b> Your main core. It securely stores all your media paths, hashes, and tags.</li>
             <li><b>character.db:</b> Handles specific character metadata and profiles.</li>
         </ul>
         
-        <h3 style='color: #ffffff; margin-bottom: 2px;'>🏷️ The Tagging System</h3>
+        <h3 style='color: #ffffff; margin-bottom: 2px;'><img src='{svg_tag}' width='16' height='16'> The Tagging System</h3>
         <ul style='margin-top: 0px;'>
             <li><b>Automatic Tags:</b> If you link an existing <i>Kemono Downloader</i> database, downloaded images from compatible sites will automatically share their tags!</li>
             <li><b>Manual Tags:</b> When you import local folders or use standalone mode, files go into a 'Tagless Inbox'. You must tag these manually.</li>
         </ul>
         
-        <h3 style='color: #ffffff; margin-bottom: 2px;'>🛠️ Where are the Tools?</h3>
-        <p style='margin-top: 0px; margin-left: 25px;'>You can access the <b>Tag Manager</b>, <b>Image Deduplication</b>, and <b>Video Deduplication</b> scanners anytime by clicking the <b>Settings ⚙️</b> button in the main app.</p>
+        <h3 style='color: #ffffff; margin-bottom: 2px;'><img src='{svg_tools}' width='16' height='16'> Where are the Tools?</h3>
+        <p style='margin-top: 0px; margin-left: 25px;'>You can access the <b>Tag Manager</b>, <b>Image Deduplication</b>, and <b>Video Deduplication</b> scanners anytime by clicking the <b>Settings</b> button in the main app.</p>
         """
         
         lbl_info = QLabel(info_text)
@@ -70,7 +80,7 @@ class FirstTimeSetupDialog(QDialog):
         action_layout.setContentsMargins(0, 15, 0, 0)
         
         # Option 1: Kemono Users
-        self.btn_link_kemono = QPushButton("🔗 Link Kemono Downloader Database")
+        self.btn_link_kemono = QPushButton("Link Kemono Downloader Database")
         self.btn_link_kemono.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_link_kemono.setFixedHeight(45)
         self.btn_link_kemono.setStyleSheet("""
@@ -80,7 +90,7 @@ class FirstTimeSetupDialog(QDialog):
         self.btn_link_kemono.clicked.connect(self.link_kemono_database)
 
         # Option 2: Non-Kemono Users (Portable Setup)
-        self.btn_standalone = QPushButton("✨ I don't have Kemono Downloader (Create Portable Database)")
+        self.btn_standalone = QPushButton("I don't have Kemono Downloader (Create Portable Database)")
         self.btn_standalone.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_standalone.setFixedHeight(45)
         self.btn_standalone.setStyleSheet("""
@@ -143,7 +153,7 @@ class FirstTimeSetupDialog(QDialog):
         
         if os.path.exists(library_db_path):
             # 🔹 Update button text and check for character.db!
-            self.btn_link_kemono.setText("⏳ Verifying and downloading assets...")
+            self.btn_link_kemono.setText("Verifying and downloading assets...")
             self.btn_link_kemono.setEnabled(False)
             QApplication.processEvents() # Force UI to update
             
@@ -170,7 +180,7 @@ class FirstTimeSetupDialog(QDialog):
         try:
             os.makedirs(new_workspace, exist_ok=True)
             
-            self.btn_standalone.setText("⏳ Building Workspace and downloading assets...")
+            self.btn_standalone.setText("Building Workspace and downloading assets...")
             self.btn_standalone.setEnabled(False)
             QApplication.processEvents() # Force UI to update
             
@@ -194,7 +204,7 @@ class FirstTimeSetupDialog(QDialog):
             self.save_and_exit(new_workspace, is_new=True)
             
         except Exception as e:
-            self.btn_standalone.setText("✨ I don't have Kemono Downloader (Create Portable Database)")
+            self.btn_standalone.setText("I don't have Kemono Downloader (Create Portable Database)")
             self.btn_standalone.setEnabled(True)
             QMessageBox.critical(self, "Database Error", f"Failed to initialize portable database:\n{e}")
 
