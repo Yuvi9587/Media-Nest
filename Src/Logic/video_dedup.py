@@ -16,6 +16,7 @@ from PyQt6.QtCore import Qt, QProcess, QThread, pyqtSignal, pyqtSlot, QUrl
 from PyQt6.QtGui import QPixmap, QImage, QIcon
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
+from Src.Logic.paths import resource_path
 
 # ==========================================
 # CUSTOM UI ELEMENTS & WORKERS
@@ -283,17 +284,17 @@ class VideoDedupTab(QWidget):
         controls_layout.setContentsMargins(5, 5, 5, 5)
         
         self.btn_skip_back = QPushButton()
-        self.btn_skip_back.setIcon(QIcon(os.path.join("assets", "Svg", "back 10Sec.svg")))
+        self.btn_skip_back.setIcon(QIcon(resource_path(os.path.join("assets", "Svg", "back 10Sec.svg"))))
         self.btn_skip_back.setStyleSheet("background-color: #3e3e42; border-radius: 4px; padding: 5px 12px;")
         self.btn_skip_back.clicked.connect(lambda: self.media_player.setPosition(self.media_player.position() - 10000))
         
         self.btn_play_pause = QPushButton()
-        self.btn_play_pause.setIcon(QIcon(os.path.join("assets", "Svg", "play.svg")))
+        self.btn_play_pause.setIcon(QIcon(resource_path(os.path.join("assets", "Svg", "play.svg"))))
         self.btn_play_pause.setStyleSheet("background-color: #3e3e42; border-radius: 4px; padding: 5px 12px;")
         self.btn_play_pause.clicked.connect(self.toggle_play_pause)
         
         self.btn_skip_forward = QPushButton()
-        self.btn_skip_forward.setIcon(QIcon(os.path.join("assets", "Svg", "skip 10Sec.svg")))
+        self.btn_skip_forward.setIcon(QIcon(resource_path(os.path.join("assets", "Svg", "skip 10Sec.svg"))))
         self.btn_skip_forward.setStyleSheet("background-color: #3e3e42; border-radius: 4px; padding: 5px 12px;")
         self.btn_skip_forward.clicked.connect(lambda: self.media_player.setPosition(self.media_player.position() + 10000))
 
@@ -496,9 +497,9 @@ class VideoDedupTab(QWidget):
 
     def on_playback_state_changed(self, state):
         if state == QMediaPlayer.PlaybackState.PlayingState:
-            self.btn_play_pause.setIcon(QIcon(os.path.join("assets", "Svg", "pause.svg")))
+            self.btn_play_pause.setIcon(QIcon(resource_path(os.path.join("assets", "Svg", "pause.svg"))))
         else:
-            self.btn_play_pause.setIcon(QIcon(os.path.join("assets", "Svg", "play.svg")))
+            self.btn_play_pause.setIcon(QIcon(resource_path(os.path.join("assets", "Svg", "play.svg"))))
 
     def on_position_changed(self, position):
         self.time_slider.blockSignals(True)

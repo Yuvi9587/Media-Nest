@@ -190,8 +190,23 @@ class SettingsDialog(QDialog):
         scale_row = QHBoxLayout()
         scale_row.addWidget(QLabel("Window UI Scale (Requires Restart):"))
         self.combo_scale = QComboBox()
+        
+        current_text = self.reverse_scale_map.get(self.current_ui_scale)
+        if not current_text:
+            try:
+                val = int(float(self.current_ui_scale) * 100)
+                current_text = f"{val}%"
+                self.scale_map[current_text] = self.current_ui_scale
+            except (ValueError, TypeError):
+                current_text = "100% (Default)"
+                
         self.combo_scale.addItems(list(self.scale_map.keys()))
-        self.combo_scale.setCurrentText(self.reverse_scale_map.get(self.current_ui_scale, "100% (Default)"))
+        self.combo_scale.addItem("Custom...")
+        self.combo_scale.setCurrentText(current_text)
+        
+        self._last_scale_text = current_text
+        self.combo_scale.currentTextChanged.connect(self.on_scale_changed)
+        
         scale_row.addWidget(self.combo_scale)
         scale_row.addStretch() 
         ui_inner_layout.addLayout(scale_row)
@@ -381,6 +396,30 @@ class SettingsDialog(QDialog):
         elif val <= 5: text = f"Balanced ({val} diffs allowed)"
         else: text = f"Loose ({val} diffs allowed)"
         self.lbl_strictness.setText(f"Strictness: {text}")
+
+    def on_scale_changed(self, text):
+        if text == "Custom...":
+            from PyQt6.QtWidgets import QInputDialog
+            val, ok = QInputDialog.getInt(
+                self, 
+                "Custom UI Scale", 
+                "Enter UI Scale percentage (e.g. 74):", 
+                100, 25, 400, 1
+            )
+            if ok:
+                custom_scale_str = str(val / 100.0)
+                custom_text = f"{val}%"
+                
+                if custom_text not in self.scale_map:
+                    self.scale_map[custom_text] = custom_scale_str
+                    self.combo_scale.insertItem(self.combo_scale.count() - 1, custom_text)
+                
+                self.combo_scale.setCurrentText(custom_text)
+                self._last_scale_text = custom_text
+            else:
+                self.combo_scale.setCurrentText(self._last_scale_text)
+        else:
+            self._last_scale_text = text
 
     # 🔹 KEYBOARD NAVIGATION INTERCEPTOR
     def keyPressEvent(self, event):
@@ -1102,7 +1141,10 @@ class SettingsDialog(QDialog):
         import traceback
         
         new_folder = self.db_path_input.text().strip()
-        new_scale_val = self.scale_map[self.combo_scale.currentText()]
+        scale_text = self.combo_scale.currentText()
+        if scale_text == "Custom...":
+            scale_text = getattr(self, '_last_scale_text', "100% (Default)")
+        new_scale_val = self.scale_map.get(scale_text, "1.0")
         new_strictness = self.slider_strictness.value() 
         config_changed = False
         

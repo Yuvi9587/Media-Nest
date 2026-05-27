@@ -215,7 +215,7 @@ class GallerySection(QWidget):
 
             from PyQt6.QtGui import QIcon
             import os
-            svg_path = os.path.join("assets", "uisvg")
+            svg_path = os.path.join(self.asset_dir, "uisvg")
 
             if is_video:
                 item.setIcon(QIcon(os.path.join(svg_path, "video.svg")))

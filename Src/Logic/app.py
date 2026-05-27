@@ -19,6 +19,7 @@ from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput, QVideoSink
 from Src.Ui.interface import MainWindowUI
 from Src.Ui.theme import VSCODE_DARK_THEME
 from Src.Logic.file_ops import FileContextMenu
+from Src.Logic.paths import resource_path
 
 # --- VIDEO THUMBNAILER (Native PyQt6) ---
 class VideoThumbnailer(QObject):
@@ -1586,7 +1587,7 @@ class MediaExplorerApp(QMainWindow):
         item.setData(has_any, Qt.ItemDataRole.UserRole + 3)
         item.setData(has_sub, Qt.ItemDataRole.UserRole + 6)
         item.setData(False, Qt.ItemDataRole.UserRole + 30)
-        item.setIcon(QIcon(os.path.join("assets", "uisvg", "folder.svg")))
+        item.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "folder.svg"))))
         if has_any: item.appendRow(QStandardItem("Loading..."))
         return item
 
@@ -1595,7 +1596,7 @@ class MediaExplorerApp(QMainWindow):
         item.setData(path, Qt.ItemDataRole.UserRole)
         item.setData(False, Qt.ItemDataRole.UserRole + 2)
         svg_name = "video.svg" if is_video else "image.svg"
-        item.setIcon(QIcon(os.path.join("assets", "uisvg", svg_name)))
+        item.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", svg_name))))
         return item
 
     def analyze_folder_content(self, path):
@@ -2381,7 +2382,7 @@ class MediaExplorerApp(QMainWindow):
                 
             from PyQt6.QtGui import QIcon
             import os
-            search_root.setIcon(QIcon(os.path.join("assets", "uisvg", "search.svg")))
+            search_root.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "search.svg"))))
 
         files_for_img_thumbs = []
         files_for_vid_thumbs = []
@@ -2447,7 +2448,7 @@ class MediaExplorerApp(QMainWindow):
                 existing_folder = QStandardItem(folder_name)
                 from PyQt6.QtGui import QIcon
                 import os
-                existing_folder.setIcon(QIcon(os.path.join("assets", "uisvg", "folder.svg")))
+                existing_folder.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "folder.svg"))))
                 existing_folder.setData(f"VIRTUAL_GROUP_{folder_name}", Qt.ItemDataRole.UserRole)
                 existing_folder.setData(True, Qt.ItemDataRole.UserRole + 2) 
                 existing_folder.setData(True, Qt.ItemDataRole.UserRole + 4) 
@@ -2520,7 +2521,7 @@ class MediaExplorerApp(QMainWindow):
             folder_item = QStandardItem(f"{folder_name} ({len(files)} items)")
             from PyQt6.QtGui import QIcon
             import os
-            folder_item.setIcon(QIcon(os.path.join("assets", "uisvg", "folder.svg")))
+            folder_item.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "folder.svg"))))
             folder_item.setData(f"VIRTUAL_GROUP_{folder_name}", Qt.ItemDataRole.UserRole)
             folder_item.setData(True, Qt.ItemDataRole.UserRole + 2) 
             folder_item.setData(True, Qt.ItemDataRole.UserRole + 4) 

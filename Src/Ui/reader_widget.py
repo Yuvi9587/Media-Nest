@@ -236,11 +236,12 @@ class ReaderImageLabel(QLabel):
     def update_cursor(self):
         from PyQt6.QtGui import QCursor, QPixmap
         import os
+        from Src.Logic.paths import resource_path
         if self.is_zoomed:
-            pm = QPixmap(os.path.join("assets", "uisvg", "zoom_out.svg"))
+            pm = QPixmap(resource_path(os.path.join("assets", "uisvg", "zoom_out.svg")))
             self.setCursor(QCursor(pm))
         else:
-            pm = QPixmap(os.path.join("assets", "uisvg", "zoom_in.svg"))
+            pm = QPixmap(resource_path(os.path.join("assets", "uisvg", "zoom_in.svg")))
             self.setCursor(QCursor(pm))
 
     def set_raw_pixmap(self, pixmap):

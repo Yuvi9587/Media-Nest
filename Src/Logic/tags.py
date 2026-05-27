@@ -16,6 +16,7 @@ from PyQt6.QtCore import Qt, QStringListModel, QThread, pyqtSignal, QSize, QUrl
 from PyQt6.QtGui import QPixmap, QImageReader, QMovie, QIcon, QColor
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
+from Src.Logic.paths import resource_path
 
 # =========================================================
 # 🖼️ RESPONSIVE IMAGE & GIF LABEL
@@ -643,7 +644,7 @@ class TagManagerTab(QWidget):
         self.btn_add_tag = QPushButton()
         self.btn_add_tag.setFixedHeight(34)
         self.btn_add_tag.setFixedWidth(40)
-        self.btn_add_tag.setIcon(QIcon(os.path.join("assets", "uisvg", "add.svg")))
+        self.btn_add_tag.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "add.svg"))))
         self.btn_add_tag.setIconSize(QSize(20, 20))
         self.btn_add_tag.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_add_tag.setStyleSheet("QPushButton { background-color: #3e3e42; border-radius: 4px; border: none; padding-left: 10px; padding-right: 10px; } QPushButton:hover { background-color: #505050; }")
@@ -652,7 +653,7 @@ class TagManagerTab(QWidget):
 
         self.btn_auto_tag = QPushButton("AI Tag")
         self.btn_auto_tag.setFixedHeight(34)
-        self.btn_auto_tag.setIcon(QIcon(os.path.join("assets", "uisvg", "ai.svg")))
+        self.btn_auto_tag.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "ai.svg"))))
         self.btn_auto_tag.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_auto_tag.setStyleSheet("QPushButton { background-color: #512da8; color: white; font-weight: bold; border-radius: 4px; padding: 0 15px; border: none; } QPushButton:hover { background-color: #673ab7; }")
         self.btn_auto_tag.clicked.connect(self.run_auto_tagger)
@@ -662,7 +663,7 @@ class TagManagerTab(QWidget):
         add_tag_layout.addWidget(self.btn_auto_tag) 
         
         self.btn_remove_file_tag = QPushButton("Delete Selected Active Tag")
-        self.btn_remove_file_tag.setIcon(QIcon(os.path.join("assets", "uisvg", "remove.svg")))
+        self.btn_remove_file_tag.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "remove.svg"))))
         self.btn_remove_file_tag.clicked.connect(self.delete_checked_tags)
         
         active_tags_layout.addWidget(self.file_tag_list)
@@ -723,7 +724,7 @@ class TagManagerTab(QWidget):
         main_layout.addWidget(self.splitter)
 
         self.cb_help_others = QCheckBox("Help others by anonymously sharing these tags to the community cloud")
-        self.cb_help_others.setIcon(QIcon(os.path.join("assets", "uisvg", "handshake.svg")))
+        self.cb_help_others.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "handshake.svg"))))
         self.cb_help_others.setIconSize(QSize(20, 20))
         self.cb_help_others.setChecked(True)
         self.cb_help_others.setStyleSheet("QCheckBox { color: #888; font-style: italic; font-size: 13px; }")

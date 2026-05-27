@@ -54,10 +54,10 @@ class DynamicImageLabel(QLabel):
         from PyQt6.QtGui import QCursor, QPixmap
         import os
         if self.is_zoomed:
-            pm = QPixmap(os.path.join("assets", "uisvg", "zoom_out.svg"))
+            pm = QPixmap(resource_path(os.path.join("assets", "uisvg", "zoom_out.svg")))
             self.setCursor(QCursor(pm))
         else:
-            pm = QPixmap(os.path.join("assets", "uisvg", "zoom_in.svg"))
+            pm = QPixmap(resource_path(os.path.join("assets", "uisvg", "zoom_in.svg")))
             self.setCursor(QCursor(pm))
 
     def clear(self):
