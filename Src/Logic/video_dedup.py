@@ -18,9 +18,6 @@ from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 from Src.Logic.paths import resource_path
 
-# ==========================================
-# CUSTOM UI ELEMENTS & WORKERS
-# ==========================================
 
 class ClickableFrame(QFrame):
     """A custom widget that acts like a button so we can click the whole video card."""
@@ -69,9 +66,6 @@ class ThumbnailWorker(QThread):
                 pass
 
 
-# ==========================================
-# 📥 DOWNLOAD WORKER (VDF + FFMPEG)
-# ==========================================
 class EngineDownloadThread(QThread):
     progress = pyqtSignal(int)
     status = pyqtSignal(str)
@@ -147,9 +141,6 @@ class EngineDownloadThread(QThread):
             self.finished_signal.emit(False, str(e))
 
 
-# ==========================================
-# MAIN TAB CLASS
-# ==========================================
 
 class VideoDedupTab(QWidget):
     def __init__(self, settings_dialog):
@@ -337,9 +328,6 @@ class VideoDedupTab(QWidget):
 
         self.load_cached_results()
 
-    # ==========================================
-    # 🔹 INSTANT RESUME & CACHE MANAGEMENT 🔹
-    # ==========================================
     def filter_ignored_vdf_groups(self, groups):
         if not groups: return groups, False
         
@@ -447,9 +435,6 @@ class VideoDedupTab(QWidget):
         except Exception as e:
             self.log_console.append(f"> Cache Load Error: {e}")
 
-    # ==========================================
-    # 📥 ENGINE DOWNLOAD LOGIC
-    # ==========================================
     def download_engine(self):
         self.btn_download.setEnabled(False)
         self.btn_scan.setEnabled(False)
@@ -480,9 +465,6 @@ class VideoDedupTab(QWidget):
             QMessageBox.critical(self, "Download Error", f"Failed to download the engine:\n{msg}")
 
 
-    # ==========================================
-    # VIDEO PLAYBACK LOGIC
-    # ==========================================
     @pyqtSlot(str)
     def play_video(self, file_path):
         self.lbl_preview_title.setText(f"▶️ Playing: {os.path.basename(file_path)}")
@@ -523,9 +505,6 @@ class VideoDedupTab(QWidget):
         self.lbl_time.setText(f"{format_ms(position)} / {format_ms(duration)}")
 
 
-    # ==========================================
-    # CLI LOGIC
-    # ==========================================
     def start_cli_scan(self):
         if not os.path.exists(self.cli_path) or not os.path.exists(self.ffmpeg_path):
             QMessageBox.critical(self, "Engines Missing", "Required engines are missing.\n\nPlease click the 'Download VDF Engine' button to install them before scanning.")
@@ -680,9 +659,6 @@ class VideoDedupTab(QWidget):
             self.lbl_status.setText("Scan Failed.")
             self.log_console.append(f"\n> [CRITICAL] Engine failed to write JSON. (Exit code {exit_code})")
 
-    # ==========================================
-    # PARSING & UI RENDERING
-    # ==========================================
     def parse_vdf_results(self):
         if not os.path.exists(self.output_json_path):
             return
@@ -806,13 +782,11 @@ class VideoDedupTab(QWidget):
                 lbl_info.setWordWrap(True)
                 lbl_info.setStyleSheet("border: none; margin-top: 5px;")
 
-                # 🔹 FIX: Added thicker padding and removed fixed height
                 btn_del = QPushButton("Recycle Bin")
                 btn_del.setStyleSheet("""
                     QPushButton { background-color: #a31515; color: white; border-radius: 4px; padding: 8px 12px; font-weight: bold; border: none; }
                     QPushButton:hover { background-color: #d13438; }
                 """)
-                # 🔹 FIX: Now we pass the group_card and the layout so the delete function knows how many videos are left
                 btn_del.clicked.connect(lambda checked, p=v_path, w=vid_widget, gc=group_card, vl=videos_layout: self.delete_video_duplicate(p, w, gc, vl))
 
                 v_layout.addWidget(lbl_info)
@@ -824,9 +798,6 @@ class VideoDedupTab(QWidget):
             
             btn_ignore.clicked.connect(lambda checked, gc=group_card, g_items=items, cbs=checkbox_refs: self.mark_not_duplicates(gc, g_items, cbs))
 
-    # ==========================================
-    # 🔹 EXCEPTION MANAGER (MARK NOT DUPLICATES)
-    # ==========================================
     def mark_not_duplicates(self, group_card, group_items, checkboxes):
         db_folder = self.settings_dialog.db_path_input.text().strip()
         db_file = os.path.join(db_folder, "library.db")
@@ -865,7 +836,7 @@ class VideoDedupTab(QWidget):
                     if cb.isChecked():
                         selected_paths.append(cb.property("file_path"))
                 except RuntimeError:
-                    continue # 🔹 FIX: Safely skip deleted C++ objects to prevent crashing
+                    continue
             
             if not selected_paths:
                 QMessageBox.warning(self, "Selection Required", "Please check the box next to the video(s) that are not duplicates.")
@@ -911,24 +882,20 @@ class VideoDedupTab(QWidget):
         group_card.deleteLater()
         self.log_console.append("> Exception saved. These videos will be ignored in all future scans.")
 
-    # 🔹 FIX: Updated signature to accept group_card and videos_layout for auto-pruning
     def delete_video_duplicate(self, file_path, widget_to_remove, group_card, videos_layout):
         reply = QMessageBox.question(self, "Confirm Delete", f"Move this video to the Recycle Bin?\n\n{os.path.basename(file_path)}", 
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                # 1. Stop Player
                 if self.media_player.source().toLocalFile() == file_path:
                     self.media_player.stop()
                     self.media_player.setSource(QUrl())
                     self.lbl_preview_title.setText("Video Player (Click a video to play)")
 
-                # 2. Delete File
                 if os.path.exists(file_path): 
                     send2trash(file_path)
                 
-                # 3. Delete from Main Database
                 db_folder = self.settings_dialog.db_path_input.text().strip()
                 db_file = os.path.join(db_folder, "library.db")
                 if os.path.exists(db_file):
@@ -938,7 +905,6 @@ class VideoDedupTab(QWidget):
                     conn.commit()
                     conn.close()
 
-                # 4. LIVE JSON PRUNING
                 if os.path.exists(self.output_json_path):
                     with open(self.output_json_path, 'r', encoding='utf-8') as f:
                         groups = json.load(f)
@@ -951,11 +917,9 @@ class VideoDedupTab(QWidget):
                     with open(self.output_json_path, 'w', encoding='utf-8') as f:
                         json.dump(groups, f, indent=4)
                 
-                # 5. Update UI
                 widget_to_remove.setParent(None)
                 widget_to_remove.deleteLater()
                 
-                # 🔹 FIX: Count how many active videos are left. If 1 or 0, destroy the group card!
                 active_count = sum(1 for i in range(videos_layout.count()) if videos_layout.itemAt(i).widget() is not None)
                 if active_count <= 1:
                     group_card.setParent(None)

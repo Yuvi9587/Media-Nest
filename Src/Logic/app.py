@@ -21,7 +21,6 @@ from Src.Ui.theme import VSCODE_DARK_THEME
 from Src.Logic.file_ops import FileContextMenu
 from Src.Logic.paths import resource_path
 
-# --- VIDEO THUMBNAILER (Native PyQt6) ---
 class VideoThumbnailer(QObject):
     thumbnail_ready = pyqtSignal(str, QImage)
 
@@ -59,7 +58,6 @@ class VideoThumbnailer(QObject):
         self.current_path = None
 
     def process_next(self):
-        # 🔹 Block processing if the worker is paused!
         if not self.queue or getattr(self, 'is_paused', False):
             self.is_processing = False
             self.current_path = None
@@ -84,14 +82,12 @@ class VideoThumbnailer(QObject):
         QTimer.singleShot(30, self.player.play)
         self.timeout_timer.start(3000)
 
-    # 🔹 PAUSE/RESUME LOGIC 🔹
     def pause(self):
         self.is_paused = True
         if self.is_processing:
             self.player.stop()
             self.timeout_timer.stop()
             self.is_processing = False
-            # Put the video back in the queue so it doesn't get skipped!
             if getattr(self, 'current_path', None):
                 self.queue.insert(0, self.current_path)
                 self.current_path = None
@@ -145,9 +141,6 @@ class VideoThumbnailer(QObject):
         self.current_path = None
         self.process_next()
 
-# ==========================================
-# 🔹 MULTI-CORE IMAGE ENGINE
-# ==========================================
 class SingleThumbnailThread(QThread):
     """A single worker thread that decodes images."""
     thumbnail_ready = pyqtSignal(str, QImage)
@@ -197,20 +190,17 @@ class SingleThumbnailThread(QThread):
             except IndexError:
                 continue
                 
-            # print(f"[ThumbThread] Processing: {path} | Queue remaining: {len(self.queue)}")
 
             is_gallery = os.path.isdir(path)
             target_path = path
             
-            # 🔹 CUSTOM MANGA SUPPORT
             if path.startswith("custom_manga:"):
                 parts = path.split("|")
                 if len(parts) >= 2:
                     target_path = parts[1]
-                    is_gallery = True # Draw it as a stacked gallery!
+                    is_gallery = True
             
             if is_gallery:
-                # Find the first image in the directory
                 try:
                     for entry in os.scandir(path):
                         if entry.is_file() and entry.name.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
@@ -219,7 +209,6 @@ class SingleThumbnailThread(QThread):
                 except OSError:
                     pass
 
-            # 1. CHECK CACHE
             path_hash = hashlib.md5(path.encode('utf-8')).hexdigest()
             cache_file_path = os.path.join(self.cache_dir, f"{path_hash}.jpg")
 
@@ -230,12 +219,10 @@ class SingleThumbnailThread(QThread):
                     time.sleep(0.005)
                     continue
 
-            # 2. GENERATE NEW
             try:
                 from PIL import Image
                 import io
                 
-                # print(f"[ThumbThread] Generating new for: {target_path}")
                 
                 loaded_image = QImage()
                 with Image.open(target_path) as pil_img:
@@ -257,11 +244,9 @@ class SingleThumbnailThread(QThread):
                     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
                     
                     if is_gallery:
-                        # Draw stacked paper effect for galleries
                         w = loaded_image.width()
                         h = loaded_image.height()
                         
-                        # Layer 1 (Bottom, tilted left)
                         painter.save()
                         painter.translate(TARGET_SIZE//2 - 6, TARGET_SIZE//2 + 8)
                         painter.rotate(-12)
@@ -270,7 +255,6 @@ class SingleThumbnailThread(QThread):
                         painter.drawRect(QRect(-w//2, -h//2, w, h))
                         painter.restore()
                         
-                        # Layer 2 (Middle, tilted right)
                         painter.save()
                         painter.translate(TARGET_SIZE//2 + 8, TARGET_SIZE//2 - 4)
                         painter.rotate(9)
@@ -279,7 +263,6 @@ class SingleThumbnailThread(QThread):
                         painter.drawRect(QRect(-w//2, -h//2, w, h))
                         painter.restore()
 
-                        # Layer 3 (Top-ish, slightly tilted)
                         painter.save()
                         painter.translate(TARGET_SIZE//2 - 3, TARGET_SIZE//2 - 6)
                         painter.rotate(-4)
@@ -300,7 +283,6 @@ class SingleThumbnailThread(QThread):
 
                     final_image.save(cache_file_path, "JPG", 85)
                     self.thumbnail_ready.emit(path, final_image)
-                    # print(f"[ThumbThread] Emitted generated thumbnail for: {path}")
             except Exception as e:
                 print(f"[ThumbThread] Error generating thumbnail for {path}: {e}")
 
@@ -319,13 +301,12 @@ class ThumbnailWorker(QObject):
         super().__init__()
         self.perf_mode = perf_mode
         
-        # 🔹 DYNAMIC CORE ALLOCATION
         if perf_mode == "high":
-            self.thread_count = 8   # Load 8 images simultaneously!
+            self.thread_count = 8
         elif perf_mode == "low":
-            self.thread_count = 1   # Power saver (Safe for older laptops)
+            self.thread_count = 1
         else:
-            self.thread_count = 4   # Balanced (4 images at once)
+            self.thread_count = 4
             
         self.threads = []
         self.current_idx = 0
@@ -335,7 +316,6 @@ class ThumbnailWorker(QObject):
             t.thumbnail_ready.connect(self.thumbnail_ready.emit)
             self.threads.append(t)
 
-    # Mimic QThread commands so the rest of the app doesn't break!
     def start(self):
         for t in self.threads:
             t.start()
@@ -345,7 +325,6 @@ class ThumbnailWorker(QObject):
             t.setPriority(priority)
 
     def add_to_queue(self, path_list):
-        # Round-robin distribution: Deal the images like cards to all active threads!
         for path in path_list:
             self.threads[self.current_idx].add_to_queue([path])
             self.current_idx = (self.current_idx + 1) % self.thread_count
@@ -366,7 +345,6 @@ class ThumbnailWorker(QObject):
         for t in self.threads:
             t.stop()
 
-    # Smartly intercepts any attempts by the main app to modify the queue directly
     @property
     def queue(self):
         return [p for t in self.threads for p in t.queue]
@@ -377,11 +355,10 @@ class ThumbnailWorker(QObject):
         self.add_to_queue(new_queue)
 
 class DatabaseSearchWorker(QThread):
-    # Added 'int' at the end to return the search_id
     search_finished = pyqtSignal(list, dict, str, bool, int) 
     error_occurred = pyqtSignal(str)
 
-    def __init__(self, db_path, search_text, limit, offset, search_id, filter_type="All"): # 👈 ADDED HERE
+    def __init__(self, db_path, search_text, limit, offset, search_id, filter_type="All"):
         super().__init__()
         self.db_path = db_path
         self.search_text = search_text
@@ -458,7 +435,6 @@ class DatabaseSearchWorker(QThread):
                     folders_map[folder_name].append((file_path, file_name, "image"))
                     valid_results.append((file_path, file_name, "image"))
 
-            # --- MANGA GALLERIES SEARCH ---
             if self.filter_type in ["All", "Images"]:
                 manga_query = f"""
                     WITH GalleryAllTags AS (
@@ -494,12 +470,10 @@ class DatabaseSearchWorker(QThread):
                     for folder_path, title in manga_results:
                         if not self.is_running: return
                         if os.path.exists(folder_path):
-                            # Append directly to valid results
                             valid_results.append((folder_path, title, "gallery"))
                 except sqlite3.OperationalError:
-                    pass # MangaGalleries table might not exist yet
+                    pass
 
-            # --- CUSTOM MANGAS (PAGINATION) SEARCH ---
             if self.filter_type in ["All", "Images"]:
                 custom_query = f"""
                     WITH CustomAllTags AS (
@@ -533,7 +507,6 @@ class DatabaseSearchWorker(QThread):
                     for manga_id, title, cover_image in custom_results:
                         if not self.is_running: return
                         
-                        # Fetch extra pages for the stacked thumbnail background
                         cursor2 = conn.cursor()
                         cursor2.execute("SELECT image_path FROM CustomMangaPages WHERE manga_id = ? AND image_path != ? ORDER BY page_number ASC LIMIT 3", (manga_id, cover_image))
                         extra_pages = [r[0] for r in cursor2.fetchall()]
@@ -545,7 +518,7 @@ class DatabaseSearchWorker(QThread):
                         if os.path.exists(cover_image):
                             valid_results.append((custom_path, title, "gallery"))
                 except sqlite3.OperationalError:
-                    pass # CustomMangas table might not exist yet
+                    pass
 
             is_appending = self.offset > 0
             self.search_finished.emit(valid_results, dict(folders_map), self.search_text, is_appending, self.search_id)
@@ -608,7 +581,6 @@ class SmartTreeFilter(QSortFilterProxyModel):
 
         return False
 
-# --- CUSTOM MULTI-TAG COMPLETER ---
 class MultiTagCompleter(QCompleter):
     def __init__(self, tags, parent=None):
         super().__init__(tags, parent)
@@ -616,7 +588,6 @@ class MultiTagCompleter(QCompleter):
         self.setFilterMode(Qt.MatchFlag.MatchContains) 
 
     def showPopup(self):
-        # 1. Let PyQt generate the popup normally first
         super().showPopup()
         
         popup = self.popup()
@@ -625,14 +596,10 @@ class MultiTagCompleter(QCompleter):
         if popup and search_bar:
             from PyQt6.QtCore import QPoint
             
-            # 2. Get the absolute coordinates of the bottom-left of the search bar
             global_pos = search_bar.mapToGlobal(QPoint(0, search_bar.height()))
             
-            # 3. Forcibly move the popup to these exact coordinates every time
-            # This overrides Qt's tendency to throw it to Monitor 1 during full-screen
             popup.move(global_pos)
             
-            # 4. Lock the width to perfectly match the search bar
             popup.setFixedWidth(search_bar.width())
 
     def pathFromIndex(self, index):
@@ -643,7 +610,6 @@ class MultiTagCompleter(QCompleter):
             prefix = current_text[:current_text.rfind(',')]
             last_word = current_text.split(',')[-1].strip()
             
-            # Put the tilde back if the user typed it for this specific word!
             if last_word.startswith('~'):
                 return f"{prefix}, ~{suggestion}"
             return f"{prefix}, {suggestion}"
@@ -664,7 +630,6 @@ class MultiTagCompleter(QCompleter):
             
         return [search_term]
 
-# --- SCANNER WORKER ---
 class ScannerWorker(QThread):
     batch_found = pyqtSignal(str, list)
     finished = pyqtSignal()
@@ -690,7 +655,6 @@ class ScannerWorker(QThread):
                 if is_img or is_vid:
                     full_path = os.path.join(root, file)
                     
-                    # 🔹 FIX: Skip 0-byte or heavily corrupted ghost files
                     try:
                         if os.path.getsize(full_path) < 100:  
                             continue
@@ -712,15 +676,12 @@ class ScannerWorker(QThread):
     def stop(self):
         self.is_running = False
 
-# --- DELEGATE ---
 class FolderButtonDelegate(QStyledItemDelegate):
     button_clicked = pyqtSignal(object)
    
     def paint(self, painter, option, index):
-        # Draw default item first (text, selection, highlight)
         super().paint(painter, option, index)
 
-        # Check if this item should show folder toggle icon
         is_folder = index.data(Qt.ItemDataRole.UserRole + 2)
         has_subfolders = index.data(Qt.ItemDataRole.UserRole + 6)
         is_flat_root = index.data(Qt.ItemDataRole.UserRole + 4)
@@ -728,13 +689,11 @@ class FolderButtonDelegate(QStyledItemDelegate):
         if not ((is_folder and has_subfolders) or is_flat_root):
             return
 
-        # Get main window to access icons
         main_window = self.parent().window()
 
         if not hasattr(main_window, "icon_folder_closed"):
             return
 
-        # Determine open/close state
         is_open = index.data(Qt.ItemDataRole.UserRole + 30)
 
         icon = (
@@ -748,7 +707,6 @@ class FolderButtonDelegate(QStyledItemDelegate):
             20
         )
 
-        # Define right-side icon area
         button_rect = QRect(
             option.rect.right() - 30,
             option.rect.top(),
@@ -758,7 +716,6 @@ class FolderButtonDelegate(QStyledItemDelegate):
 
         painter.save()
 
-        # Center icon inside button rect
         x = button_rect.x() + (button_rect.width() - pixmap.width()) // 2
         y = button_rect.y() + (button_rect.height() - pixmap.height()) // 2
 
@@ -786,7 +743,6 @@ class FloatingViewerWindow(QWidget):
         self.setWindowTitle("Media Nest - Detached Viewer")
         self.setMinimumSize(800, 600)
         
-        # Apply the VS Code Dark theme to the floating window
         from Src.Ui.theme import VSCODE_DARK_THEME
         self.setStyleSheet(VSCODE_DARK_THEME)
 
@@ -794,12 +750,9 @@ class FloatingViewerWindow(QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
 
     def closeEvent(self, event):
-        # When the user clicks the 'X' on this detached window,
-        # tell the main app to pull the media player back!
         self.main_app.reattach_viewer()
         event.accept()
 
-# --- MAIN APP ---
 class MediaExplorerApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -809,14 +762,11 @@ class MediaExplorerApp(QMainWindow):
         self.image_cache = {}
         self.ui.setup_ui(self)
         self.setWindowTitle("Media Nest V2.0.0")
-        # --- DYNAMIC TEXT SCALING FIX ---
         theme = VSCODE_DARK_THEME
         
         try:
-            # Grab the scale factor we set in main.py
             current_scale = float(os.environ.get("QT_SCALE_FACTOR", "1.0"))
             
-            # If the scale is 90% (0.9) or lower, force bold white text!
             if current_scale < 1.0:
                 theme += """
                     QWidget { 
@@ -828,12 +778,10 @@ class MediaExplorerApp(QMainWindow):
                     }
                 """
         except Exception:
-            pass # Failsafe in case the scale variable isn't found
+            pass
             
         self.setStyleSheet(theme)
-        # --------------------------------
 
-        # Setup icon loader helper
         from Src.Logic.paths import resource_path
         self.asset_dir = resource_path("assets")
         self.get_icon = lambda name: QIcon(
@@ -848,7 +796,6 @@ class MediaExplorerApp(QMainWindow):
         self.clean_img_exts = [e.replace("*", "") for e in self.image_extensions]
         self.clean_vid_exts = [e.replace("*", "") for e in self.video_extensions]
 
-        # --- STATE VARIABLES ---
         self.is_video_looping = False
         self.is_muted = False
         self.previous_volume = 100
@@ -866,10 +813,9 @@ class MediaExplorerApp(QMainWindow):
         self.proxy_model.setSourceModel(self.model)        
         self.ui.tree_view.setModel(self.proxy_model)
         
-        # --- SEARCH DEBOUNCE TIMER ---
         self.search_timer = QTimer(self)
         self.search_timer.setSingleShot(True)
-        self.search_timer.setInterval(300) # Wait 300ms after the last input before searching
+        self.search_timer.setInterval(300)
         self.search_timer.timeout.connect(self.process_search)
         self.clear_player_timer = QTimer(self)
         self.clear_player_timer.setSingleShot(True) 
@@ -898,13 +844,11 @@ class MediaExplorerApp(QMainWindow):
             self.ui.gallery_section.name_filter_input.textChanged.connect(self.apply_gallery_filter)
         self.current_image_path = None
         
-        # This skips thousands of scrollbar math calculations.
         self.ui.gallery_section.list_widget.setUniformItemSizes(True)
         self.ui.gallery_section.list_widget.setGridSize(QSize(250, 270))
         self.ui.gallery_section.list_widget.setLayoutMode(QListWidget.LayoutMode.Batched)
         self.ui.gallery_section.list_widget.setBatchSize(50)
         
-        # 🔹 CONNECT THE SCROLLBAR LISTENER
         self.ui.gallery_section.list_widget.verticalScrollBar().valueChanged.connect(self.on_gallery_scroll)
         self.is_fetching_data = False 
         
@@ -913,15 +857,11 @@ class MediaExplorerApp(QMainWindow):
         self.loading_item_ref = None 
         
         self.current_search_offset = 0
-        self.current_search_id = 0  # Tracks which search is active to prevent ghost-appending
+        self.current_search_id = 0
 
-        # ==========================================
-        # 🔹 PERFORMANCE MODE INITIALIZATION
-        # ==========================================
         import json
         perf_mode = "balanced"
         
-        # Safely locate and read the config file
         import sys
         if getattr(sys, 'frozen', False):
             base_dir = os.path.dirname(sys.executable)
@@ -943,9 +883,6 @@ class MediaExplorerApp(QMainWindow):
         self.thumb_worker.thumbnail_ready.connect(self.on_thumbnail_ready)
         self.thumb_worker.start()
         
-        # 🔹 DYNAMIC CPU PRIORITY
-        # If High Performance is selected, let the CPU dedicate maximum power to thumbnails.
-        # If Low/Balanced is selected, force it to the background so the UI doesn't lag.
         if perf_mode == "high":
             self.thumb_worker.setPriority(QThread.Priority.HighestPriority)
         elif perf_mode == "low":
@@ -953,7 +890,6 @@ class MediaExplorerApp(QMainWindow):
         else:
             self.thumb_worker.setPriority(QThread.Priority.LowPriority)
         
-        # Initialize Video Worker
         self.vid_thumb_worker = VideoThumbnailer()
         self.vid_thumb_worker.thumbnail_ready.connect(self.on_thumbnail_ready)
         self.pending_thumbnails = {}
@@ -975,15 +911,12 @@ class MediaExplorerApp(QMainWindow):
 
     def closeEvent(self, event):
         """Fires exactly when the user clicks the 'X' to close the app."""
-        # 1. Stop the Main Media Player safely
         if hasattr(self, 'media_player'):
             self.media_player.stop()
             
-        # 2. Kill the Image Thumbnail Worker (This one IS a QThread)
         if hasattr(self, 'thumb_worker'):
             self.thumb_worker.stop()
 
-        # 3. Kill the Video Thumbnail Worker (This one is a QObject with a hidden media player)
         if hasattr(self, 'vid_thumb_worker'):
             self.vid_thumb_worker.queue.clear()
             self.vid_thumb_worker.is_processing = False
@@ -992,7 +925,6 @@ class MediaExplorerApp(QMainWindow):
             if hasattr(self.vid_thumb_worker, 'timeout_timer'):
                 self.vid_thumb_worker.timeout_timer.stop()
 
-        # 4. Stop background database searches
         if hasattr(self, 'db_search_worker') and self.db_search_worker.isRunning():
             self.db_search_worker.is_running = False
             self.db_search_worker.quit()
@@ -1009,13 +941,11 @@ class MediaExplorerApp(QMainWindow):
         self.media_player.setAudioOutput(self.audio_output)
         self.media_player.setVideoOutput(self.ui.video_widget)
 
-        # Hook up UI Controls
         self.ui.btn_play.clicked.connect(self.toggle_play_pause)
         self.ui.btn_skip_backward.clicked.connect(self.skip_backward)
         self.ui.btn_skip_forward.clicked.connect(self.skip_forward)
         self.ui.btn_fullscreen.clicked.connect(self.toggle_fullscreen)        
         
-        # New Hooks for Volume and Loop
         self.ui.btn_loop.clicked.connect(self.toggle_loop)
         self.ui.slider_volume.valueChanged.connect(self.set_volume)
         self.ui.btn_volume.clicked.connect(self.toggle_mute)
@@ -1032,7 +962,6 @@ class MediaExplorerApp(QMainWindow):
         self.is_video_looping = not self.is_video_looping
 
         if self.is_video_looping:
-            # Use colored version permanently
             self.ui.btn_loop.setIcon(
                 QIcon(os.path.join(self.asset_dir, "Svg2", "repeat.svg"))
             )
@@ -1064,9 +993,6 @@ class MediaExplorerApp(QMainWindow):
         self.ui.btn_detach.setText("⬐") 
         self.ui.btn_detach.setToolTip("Reattach Viewer")
 
-        # ==========================================
-        # 🔹 DYNAMIC LAYOUT: Stack Tree above Gallery
-        # ==========================================
         if not hasattr(self, 'original_sidebar_width'):
             self.original_sidebar_width = self.ui.sidebar_widget.maximumWidth()
             
@@ -1076,12 +1002,7 @@ class MediaExplorerApp(QMainWindow):
         self.ui.vertical_splitter.insertWidget(0, self.ui.sidebar_widget)
         self.ui.vertical_splitter.setSizes([400, 400])
         
-        # ==========================================
-        # 🔹 AUTO-RESIZE GALLERY TO SMALL
-        # ==========================================
-        # Save whatever size the user was currently using
         self.previous_gallery_mode = self.ui.gallery_section.current_mode
-        # Force the gallery into "small" mode for the compact bottom layout
         if hasattr(self.ui.gallery_section, 'set_size_mode'):
             self.ui.gallery_section.set_size_mode("small")
 
@@ -1089,10 +1010,6 @@ class MediaExplorerApp(QMainWindow):
         """Pulls the viewer back into the main app and restores the UI layout."""
         if self.floating_viewer:
             
-            # ==========================================
-            # 🔹 RESTORE LAYOUT: Put Tree back on the left
-            # ==========================================
-            # FIX: Insert it back into the horizontal_splitter, NOT the main layout!
             self.ui.horizontal_splitter.insertWidget(0, self.ui.sidebar_widget)
             
             if hasattr(self, 'original_sidebar_width'):
@@ -1101,15 +1018,9 @@ class MediaExplorerApp(QMainWindow):
             self.ui.vertical_splitter.insertWidget(0, self.ui.viewer_widget)
             self.ui.vertical_splitter.setSizes([600, 200])
             
-            # ==========================================
-            # 🔹 RESTORE GALLERY SIZE
-            # ==========================================
-            # Snap the gallery back to whatever size it was before detaching!
             if hasattr(self, 'previous_gallery_mode') and hasattr(self.ui.gallery_section, 'set_size_mode'):
                 self.ui.gallery_section.set_size_mode(self.previous_gallery_mode)
             
-            # ==========================================
-            # Clean up the floating window
             self.floating_viewer.deleteLater()
             self.floating_viewer = None
             
@@ -1118,11 +1029,8 @@ class MediaExplorerApp(QMainWindow):
 
     def on_filter_changed(self, text):
         """Triggers when the user changes the Dropdown."""
-        # 1. Instantly hide/show items currently on screen
         self.apply_gallery_filter()
         
-        # 2. 🔹 If a database search is active, we MUST restart the search 
-        # so the database offset resets and fetches a fresh, pure batch!
         if getattr(self, 'db_connection', None) and self.ui.search_bar.text().strip():
             self.process_search()
 
@@ -1133,7 +1041,6 @@ class MediaExplorerApp(QMainWindow):
             
         filter_type = self.ui.gallery_section.filter_combo.currentText()
         
-        # Grab the text from our new search box
         name_query = ""
         if hasattr(self.ui.gallery_section, 'name_filter_input'):
             name_query = self.ui.gallery_section.name_filter_input.text().strip().lower()
@@ -1147,19 +1054,16 @@ class MediaExplorerApp(QMainWindow):
             text = item.text()
             text_lower = text.lower()
             
-            # 1. Check if it matches the Text Search (if any)
             matches_name = True
             if name_query:
                 matches_name = name_query in text_lower
                 
-            # 2. Check if it matches the Type Dropdown
             matches_type = True
             if filter_type == "Images":
                 matches_type = "🎬" not in text
             elif filter_type == "Videos":
                 matches_type = "🖼️" not in text
                 
-            # 3. Only show the item if it passes BOTH tests!
             item.setHidden(not (matches_name and matches_type))
 
     def set_volume(self, value):
@@ -1193,7 +1097,6 @@ class MediaExplorerApp(QMainWindow):
         if state == QMediaPlayer.PlaybackState.PlayingState:
             self.ui.video_container.btn_play.setIcon(self.get_icon("pause"))
             
-            # 🔹 ONLY pause background workers if NOT on High Performance mode!
             if getattr(self, "current_perf_mode", "balanced") != "high":
                 if hasattr(self, "thumb_worker"):
                     self.thumb_worker.pause()
@@ -1202,13 +1105,11 @@ class MediaExplorerApp(QMainWindow):
         else:
             self.ui.video_container.btn_play.setIcon(self.get_icon("play"))
             
-            # 🔹 Always RESUME background workers when video pauses or finishes
             if hasattr(self, "thumb_worker"):
                 self.thumb_worker.resume()
             if hasattr(self, "vid_thumb_worker") and hasattr(self.vid_thumb_worker, "resume"):
                 self.vid_thumb_worker.resume()
 
-    # --- EXISTING PLAYER LOGIC METHODS ---
     def skip_backward(self):
         self.flash_button_icon(self.ui.btn_skip_backward, "back 10Sec")
         current_pos = self.media_player.position()
@@ -1239,21 +1140,16 @@ class MediaExplorerApp(QMainWindow):
 
     def open_settings_dialog(self):
         """Opens the Settings dialog and handles database reconnection if it changes."""
-        # Import the new dialog file
         from Src.Dialogs.settings_dialog import SettingsDialog
         import os
         import json
         
-        # 🔹 Save config permanently in the user's AppData folder so it survives compilation!
         appdata_path = os.environ.get('APPDATA', os.path.expanduser('~'))
         config_path = os.path.join(appdata_path, 'MediaNest', 'config.json')
         
-        # Launch the dialog
         dialog = SettingsDialog(config_path, self)
         
-        # If the user clicks "Save" and the dialog closes successfully...
         if dialog.exec():
-            # Only reconnect if they actually picked a new folder
             if dialog.db_folder_changed:
                 if getattr(self, 'db_connection', None):
                     try:
@@ -1268,7 +1164,6 @@ class MediaExplorerApp(QMainWindow):
         item = list_widget.itemAt(position)
         
         if item:
-            # 🔹 Block signals so right-clicking DOES NOT auto-play the media!
             list_widget.blockSignals(True)
             list_widget.setCurrentItem(item)
             list_widget.blockSignals(False)
@@ -1283,7 +1178,6 @@ class MediaExplorerApp(QMainWindow):
         index = self.ui.tree_view.indexAt(position)
         
         if index.isValid():
-            #  Block signals here too
             self.ui.tree_view.blockSignals(True)
             self.ui.tree_view.setCurrentIndex(index)
             self.ui.tree_view.blockSignals(False)
@@ -1292,7 +1186,6 @@ class MediaExplorerApp(QMainWindow):
             selected_path = str(item.data(Qt.ItemDataRole.UserRole))
             is_folder = item.data(Qt.ItemDataRole.UserRole + 2)
             
-            # : Tell the context menu this is a locked virtual folder
             if selected_path.startswith("VIRTUAL_"):
                 target_folder = "VIRTUAL_BLOCK"
             else:
@@ -1306,7 +1199,6 @@ class MediaExplorerApp(QMainWindow):
 
     def get_active_target_folder(self):
         """Determines where a paste operation should go based on UI focus."""
-        # 🔹 Block paste if a Database Search is currently active
         if getattr(self, 'db_connection', None) and self.ui.search_bar.text().strip():
             return "VIRTUAL_BLOCK"
 
@@ -1315,10 +1207,8 @@ class MediaExplorerApp(QMainWindow):
             if idx.isValid():
                 item = self.get_source_item(idx)
                 if item:
-                    # Ensure path is a string to prevent errors
                     path = str(item.data(Qt.ItemDataRole.UserRole))
                     
-                    # 🔹 Block paste if right-clicking a virtual search result
                     if path.startswith("VIRTUAL_"):
                         return "VIRTUAL_BLOCK"
                         
@@ -1335,7 +1225,6 @@ class MediaExplorerApp(QMainWindow):
                 item = self.get_source_item(idx)
                 return item.data(Qt.ItemDataRole.UserRole) if item else None
                 
-        # Fallback to gallery if tree doesn't have focus
         item = self.ui.gallery_section.list_widget.currentItem()
         return item.data(Qt.ItemDataRole.UserRole) if item else None
 
@@ -1352,7 +1241,6 @@ class MediaExplorerApp(QMainWindow):
     def shortcut_paste(self):
         target = self.get_active_target_folder()
         
-        # 🔹 Show a warning if they try to use Ctrl+V in search results
         if target == "VIRTUAL_BLOCK":
             QMessageBox.information(self, "Action Blocked", "You cannot paste files into a database search result.\n\nPlease clear the search or select a real folder first.")
             return
@@ -1393,15 +1281,12 @@ class MediaExplorerApp(QMainWindow):
             self.media_player.play()
 
     def toggle_fullscreen(self):
-        # Block button signal to prevent double trigger
         self.ui.btn_fullscreen.blockSignals(True)
 
         if getattr(self, 'is_video_maximized', False):
-            # POP IN: Restore to normal
             self.is_video_maximized = False
             self.ui.btn_fullscreen.setIcon(self.get_icon("fullscreen"))
             
-            # Put the video container back into the app's layout
             self.ui.video_container.showNormal()
             self.ui.viewer_layout.addWidget(self.ui.video_container)
             
@@ -1409,20 +1294,16 @@ class MediaExplorerApp(QMainWindow):
             self.ui.video_controls.show()
             self.ui.video_container.unsetCursor()
         else:
-            # POP OUT: Detach and go true fullscreen
             self.is_video_maximized = True
             self.ui.btn_fullscreen.setIcon(self.get_icon("minimize"))
             
-            # Detach from the main layout and make it a top-level window
             self.ui.video_container.setParent(None)
             
-            # This will cover the taskbar instantly
             self.ui.video_container.showFullScreen()
             self.media_player.setPlaybackRate(1.0)
             
             self.autohide_timer.start()
 
-        # Re-enable after short delay
         QTimer.singleShot(150, lambda: self.ui.btn_fullscreen.blockSignals(False))
 
     def _reset_fullscreen_flag(self):
@@ -1457,9 +1338,6 @@ class MediaExplorerApp(QMainWindow):
         )
         dummy_url = QUrl.fromLocalFile(dummy_file)
 
-        # -------------------------------------------------
-        # 1. Release MAIN VIDEO PLAYER
-        # -------------------------------------------------
         if hasattr(self, "media_player"):
             try:
                 if self.media_player.source().isLocalFile():
@@ -1480,9 +1358,6 @@ class MediaExplorerApp(QMainWindow):
             except Exception:
                 pass
 
-        # -------------------------------------------------
-        # 2. Release VIDEO THUMBNAIL PLAYER
-        # -------------------------------------------------
         if hasattr(self, "vid_thumb_worker"):
             try:
                 self.vid_thumb_worker.timeout_timer.stop()
@@ -1497,9 +1372,6 @@ class MediaExplorerApp(QMainWindow):
             except Exception:
                 pass
 
-        # -------------------------------------------------
-        # 3. Remove file from THUMBNAIL QUEUES
-        # -------------------------------------------------
         if hasattr(self, "thumb_worker"):
             try:
                 self.thumb_worker.queue = [
@@ -1518,9 +1390,6 @@ class MediaExplorerApp(QMainWindow):
             except Exception:
                 pass
 
-        # -------------------------------------------------
-        # 4. Release IMAGE VIEWER
-        # -------------------------------------------------
         if getattr(self, "current_image_path", None):
 
             current_img = os.path.normcase(
@@ -1529,14 +1398,12 @@ class MediaExplorerApp(QMainWindow):
 
             if current_img == target:
 
-                # Stop GIF if playing
                 movie = self.ui.lbl_image.movie()
                 if movie:
                     movie.stop()
                     self.ui.lbl_image.setMovie(None)
                     movie.deleteLater()
 
-                # Release pixmap
                 self.ui.lbl_image.clear()
                 self.ui.lbl_image.setPixmap(QPixmap())
 
@@ -1547,9 +1414,6 @@ class MediaExplorerApp(QMainWindow):
                 QApplication.processEvents()
                 time.sleep(0.05)
 
-        # -------------------------------------------------
-        # 5. Clear IMAGE CACHE
-        # -------------------------------------------------
         if hasattr(self, "image_cache"):
             try:
                 keys_to_delete = [
@@ -1570,19 +1434,16 @@ class MediaExplorerApp(QMainWindow):
 
     def clear_media_viewer(self):
         """Safely stops any playing media and resets the preview area after a search."""
-        # 1. Stop and hide the video player
         if hasattr(self, 'media_player'):
             self.media_player.stop()
             self.media_player.setSource(QUrl())
             self.ui.video_container.hide()
             
-            # 🔹 WAKE UP THE WORKERS: Resume thumbnails when media is cleared!
             if hasattr(self, "thumb_worker"):
                 self.thumb_worker.resume()
             if hasattr(self, "vid_thumb_worker") and hasattr(self.vid_thumb_worker, "resume"):
                 self.vid_thumb_worker.resume()
             
-        # 2. Stop and hide the image viewer
         self.current_image_path = None
         movie = self.ui.lbl_image.movie()
         if movie:
@@ -1593,7 +1454,6 @@ class MediaExplorerApp(QMainWindow):
         if hasattr(self.ui, 'manga_reader'):
             self.ui.manga_reader.hide()
             
-        # 3. Bring back the default placeholder
         self.ui.lbl_placeholder.setText("Select a file to view")
         self.ui.lbl_placeholder.show()
 
@@ -1605,7 +1465,6 @@ class MediaExplorerApp(QMainWindow):
             return f"{h:02}:{m:02}:{s:02}"
         return f"{m:02}:{s:02}"
 
-    # --- FILE & FOLDER LOGIC ---
     def open_folder_dialog(self):
         folder_path = QFileDialog.getExistingDirectory(self, "Select Folder")
         if folder_path:
@@ -1615,26 +1474,21 @@ class MediaExplorerApp(QMainWindow):
         if not path:
             return
 
-        # If model is empty, set header
         if self.model.rowCount() == 0:
             self.model.setHorizontalHeaderLabels(["Name"])
 
         root_name = os.path.basename(path)
 
-        # Prevent duplicate roots
         for row in range(self.model.rowCount()):
             existing_item = self.model.item(row)
             if existing_item.data(Qt.ItemDataRole.UserRole) == path:
-                return  # Already added
+                return
 
-        # Create new root item
         root_item = self.create_folder_item(root_name, path)
         self.model.appendRow(root_item)
 
-        # Populate normally
         self.populate_normal(root_item, path)
 
-        # Expand the newly added root
         proxy_index = self.proxy_model.mapFromSource(root_item.index())
         self.ui.tree_view.expand(proxy_index)
 
@@ -1690,7 +1544,6 @@ class MediaExplorerApp(QMainWindow):
             
         path = str(item.data(Qt.ItemDataRole.UserRole))
         
-        # 🔹 VIRTUAL FOLDER FIX
         if path.startswith("VIRTUAL_"):
             return
             
@@ -1701,15 +1554,12 @@ class MediaExplorerApp(QMainWindow):
 
     def eventFilter(self, obj, event):
         try:
-            # 1. Catch Escape key globally when in fullscreen
             if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Escape:
                 if getattr(self, 'is_video_maximized', False):
                     self.toggle_fullscreen()
                     return True
 
-            # 🔹 Catch Clipboard Shortcuts Globally before the gallery steals them!
             if event.type() == QEvent.Type.KeyPress:
-                # Don't intercept if the user is typing in the Search Bar
                 if obj.__class__.__name__ != "QLineEdit":
                     if event.matches(QKeySequence.StandardKey.Copy):
                         self.shortcut_copy()
@@ -1724,13 +1574,11 @@ class MediaExplorerApp(QMainWindow):
                         self.shortcut_delete()
                         return True
 
-            # 2. Catch double-click on the video to toggle fullscreen
             if event.type() == QEvent.Type.MouseButtonDblClick:
                 if obj == self.ui.video_widget:
                     self.toggle_fullscreen()
                     return True
 
-            # 3. Handle mouse movement to auto-show controls
             if event.type() in (QEvent.Type.MouseMove, QEvent.Type.MouseButtonPress):
                 if getattr(self, 'is_video_maximized', False):
                     self.show_fullscreen_controls()
@@ -1738,21 +1586,17 @@ class MediaExplorerApp(QMainWindow):
             return super().eventFilter(obj, event)
             
         except RuntimeError:
-            # The C++ object was already destroyed by Qt before Python could process this event.
-            # Safely ignore it to prevent the app from crashing.
             return False
 
     def hide_fullscreen_controls(self):
         if getattr(self, 'is_video_maximized', False):
             self.ui.video_controls.hide()
-            # Hide cursor on the new detached window
             self.ui.video_container.setCursor(Qt.CursorShape.BlankCursor) 
 
     def show_fullscreen_controls(self):
         if getattr(self, 'is_video_maximized', False):
             if self.ui.video_controls.isHidden():
                 self.ui.video_controls.show()
-                # Show cursor on the detached window
                 self.ui.video_container.unsetCursor() 
             self.autohide_timer.start()
 
@@ -1796,23 +1640,18 @@ class MediaExplorerApp(QMainWindow):
     def on_batch_received(self, folder_path, batch):
         parent_item = self.loading_item_ref
 
-        # 🔒 Safety check — ignore if folder no longer active
         if not parent_item:
             return
 
-        # Ignore results if they belong to a different folder
         if parent_item.data(Qt.ItemDataRole.UserRole) != folder_path:
             return
 
-        # Remove loading indicator if present
         if parent_item.rowCount() == 1 and parent_item.child(0).text() == "⏳ Scanning...":
             parent_item.removeRow(0)
 
-        # Add items to tree
         for display_name, full_path, is_vid in batch:
             parent_item.appendRow(self.create_file_item(display_name, full_path, is_vid))
 
-        # Prepare thumbnails
         files_for_img_thumbs = []
         files_for_vid_thumbs = []
 
@@ -1842,7 +1681,6 @@ class MediaExplorerApp(QMainWindow):
             self.vid_thumb_worker.add_to_queue(files_for_vid_thumbs)
 
     def on_thumbnail_ready(self, path, qimage):
-        # 🔹 Put the image in the basket. DO NOT touch the UI yet!
         self.pending_thumbnails[path] = qimage
 
     def apply_pending_thumbnails(self):
@@ -1850,9 +1688,7 @@ class MediaExplorerApp(QMainWindow):
         if not self.pending_thumbnails:
             return
 
-        # 🔹 REMOVED setUpdatesEnabled(False) so it doesn't cause a strobe effect!
 
-        # Loop through everything in our basket
         for path, qimage in list(self.pending_thumbnails.items()):
             if path in self.thumbnail_map:
                 try:
@@ -1867,21 +1703,18 @@ class MediaExplorerApp(QMainWindow):
                         else:
                             icon_text = ""
                         
-                        # Only update the text if it still has the hourglass to prevent micro-stutters
                         if "⏳" in item.text():
                             clean_name = os.path.basename(path)
                             item.setText(clean_name)
                 except RuntimeError:
                     pass
 
-        # Empty the basket for the next round
         self.pending_thumbnails.clear()
 
     def on_scan_finished(self):
         if not self.loading_item_ref:
             return
 
-        # Safety: if folder is no longer flattened, ignore
         if not self.loading_item_ref.data(Qt.ItemDataRole.UserRole + 4):
             self.loading_item_ref = None
             return
@@ -1902,15 +1735,12 @@ class MediaExplorerApp(QMainWindow):
         if not item:
             return
 
-        # Ensure path is cast to string to safely use .startswith()
         path = str(item.data(Qt.ItemDataRole.UserRole))
         is_currently_flat = item.data(Qt.ItemDataRole.UserRole + 4)
 
-        # Toggle open state
         is_open = item.data(Qt.ItemDataRole.UserRole + 30)
         item.setData(not is_open, Qt.ItemDataRole.UserRole + 30)
 
-        # 🔹 VIRTUAL FOLDER FIX: Don't try to read fake folders from the hard drive!
         if path.startswith("VIRTUAL_"):
             if is_open:
                 self.ui.tree_view.expand(index)
@@ -1919,7 +1749,6 @@ class MediaExplorerApp(QMainWindow):
             self.ui.tree_view.viewport().update()
             return
 
-        # --- Your existing flatten logic ---
         if is_currently_flat:
             if self.scanner_thread and self.scanner_thread.isRunning():
                 self.scanner_thread.stop()
@@ -1947,7 +1776,6 @@ class MediaExplorerApp(QMainWindow):
         if is_folder:
             if not self.ui.tree_view.isExpanded(index): self.ui.tree_view.expand(index)
             
-            # 🔹 VIRTUAL FOLDER FIX
             if path.startswith("VIRTUAL_"):
                 return
                 
@@ -1958,7 +1786,6 @@ class MediaExplorerApp(QMainWindow):
             if parent and not parent.data(Qt.ItemDataRole.UserRole + 4):
                  parent_path = str(parent.data(Qt.ItemDataRole.UserRole))
                  
-                 # 🔹 VIRTUAL FOLDER FIX
                  if not parent_path.startswith("VIRTUAL_"):
                      self.update_gallery_from_path(parent_path)
 
@@ -2008,26 +1835,21 @@ class MediaExplorerApp(QMainWindow):
         if not folder_path or not os.path.exists(folder_path):
             return
 
-        # 1. Force refresh the Gallery if the user is currently looking at this folder
         if self.current_gallery_folder == folder_path:
             self.update_gallery_from_path(folder_path, force=True)
 
-        # 2. Find the folder in the Tree View and force it to rescan its files
         def search_and_refresh(parent_item):
             for i in range(parent_item.rowCount()):
                 child = parent_item.child(i)
                 if not child: continue
                 
-                # If we found the folder that was modified
                 if child.data(Qt.ItemDataRole.UserRole) == folder_path:
-                    # Refresh it based on whether it is flattened or normal
                     if child.data(Qt.ItemDataRole.UserRole + 4): 
                         self.start_flattening(child, folder_path)
                     else:
                         self.populate_normal(child, folder_path)
                     return True
                 
-                # If it's a folder, search inside it recursively
                 if child.data(Qt.ItemDataRole.UserRole + 2):
                     if search_and_refresh(child):
                         return True
@@ -2038,11 +1860,9 @@ class MediaExplorerApp(QMainWindow):
     def load_media(self, path):
         if not path: return
         
-        # 🔹 If they clicked a new file, cancel the clear timer so it doesn't kill their new media!
         if hasattr(self, 'clear_player_timer') and self.clear_player_timer.isActive():
             self.clear_player_timer.stop()
             
-        # 🔹 CUSTOM MANGA HANDLING
         if path.startswith("custom_manga:"):
             self.current_image_path = None
             self.show_custom_manga(path)
@@ -2113,7 +1933,6 @@ class MediaExplorerApp(QMainWindow):
         self.ui.manhwa_reader.hide()
         self.ui.manhwa_zoom_slider.hide()
         
-        # We need to query DB to get the paths for this manga_id
         manga_id = int(path.split("|")[0].replace("custom_manga:", ""))
         paths = []
         try:
@@ -2137,16 +1956,13 @@ class MediaExplorerApp(QMainWindow):
         self.ui.video_container.hide() 
         self.ui.lbl_placeholder.hide()
         
-        # 🔹 WAKE UP THE WORKERS: Unpause thumbnails when switching away from a video!
         if hasattr(self, "thumb_worker"):
             self.thumb_worker.resume()
         if hasattr(self, "vid_thumb_worker") and hasattr(self.vid_thumb_worker, "resume"):
             self.vid_thumb_worker.resume()
         
-        # 🔹 VITAL: Show the container holding BOTH the scroll area and the slider
         self.ui.image_view_container.show()
 
-        # 🔹 Clear any playing GIF before loading a new image
         movie = self.ui.lbl_image.movie()
         if movie:
             movie.stop()
@@ -2156,9 +1972,6 @@ class MediaExplorerApp(QMainWindow):
         if hasattr(self.ui, 'manga_reader'):
             self.ui.manga_reader.hide()
 
-        # ==========================================
-        # 1. 🔹 Handle Animated GIFs (Standard UI)
-        # ==========================================
         if path.lower().endswith('.gif'):
             self.ui.manhwa_reader.hide()
             self.ui.lbl_image.show()
@@ -2173,26 +1986,19 @@ class MediaExplorerApp(QMainWindow):
             movie = QMovie()
             movie.setDevice(self.gif_buffer)
             
-            # The custom DynamicImageLabel will scale the movie automatically!
             self.ui.lbl_image.setMovie(movie)
             movie.start()
             if hasattr(self.ui.lbl_image, "_scale_content"):
                 self.ui.lbl_image._scale_content()
             return
 
-        # ==========================================
-        # 🔹 SMART ROUTER: Normal Photo vs Manhwa
-        # ==========================================
-        # Instantly peek at the image header to get dimensions without loading pixels into RAM
         reader = QImageReader(path)
         orig_size = reader.size()
         aspect_ratio = orig_size.height() / max(orig_size.width(), 1) if orig_size.isValid() else 1.0
 
-        # 2. 🔹 Handle Manhwa (Virtual Reader UI)
         if aspect_ratio > 2.5:
             self.ui.lbl_image.hide()
             self.ui.manhwa_reader.show()
-            # --- BRING BACK THE ZOOM SLIDER ---
             self.ui.manhwa_zoom_slider.blockSignals(True)
             self.ui.manhwa_zoom_slider.setValue(100)
             self.ui.manhwa_zoom_slider.blockSignals(False)
@@ -2203,12 +2009,10 @@ class MediaExplorerApp(QMainWindow):
             except TypeError: 
                 pass 
             self.ui.manhwa_zoom_slider.valueChanged.connect(self.zoom_virtual_manhwa)
-            # ----------------------------------
 
             folder_path = os.path.dirname(path)
             self.ui.manhwa_reader.load_folder(folder_path, jump_to_path=path)
 
-        # 3. 🔹 Handle Normal Photos (Standard UI)
         else:
             self.ui.manhwa_reader.hide()
             self.ui.lbl_image.show()
@@ -2219,7 +2023,6 @@ class MediaExplorerApp(QMainWindow):
                 pixmap = self.image_cache[path]
             else:
                 try:
-                    # Load into RAM safely to prevent OS locking
                     with open(path, 'rb') as f:
                         data = f.read()
                     
@@ -2235,7 +2038,6 @@ class MediaExplorerApp(QMainWindow):
                     if len(self.image_cache) > MAX_CACHE:
                         self.image_cache.pop(next(iter(self.image_cache)))
 
-            # Pass the RAW pixmap to our smart label and it will instantly resize it!
             if not pixmap.isNull():
                 if hasattr(self.ui.lbl_image, "set_raw_pixmap"):
                     self.ui.lbl_image.set_raw_pixmap(pixmap)
@@ -2247,18 +2049,13 @@ class MediaExplorerApp(QMainWindow):
         if hasattr(self.ui, 'manhwa_reader'):
             self.ui.manhwa_reader.set_zoom(percentage)
 
-    # ==========================================
-    # 🔹 MANHWA ZOOM ENGINE
-    # ==========================================
     def zoom_manhwa(self, zoom_percentage):
         """Dynamically rescales the Manhwa image based on the slider percentage."""
         if not getattr(self, 'current_manhwa_pixmap', None):
             return
 
-        # Calculate the new target width (e.g., 150% of the screen width)
         new_width = int(self.manhwa_base_width * (zoom_percentage / 100.0))
 
-        # IMPORTANT: Always scale from the ORIGINAL high-res image so it never loses quality!
         scaled_pixmap = self.current_manhwa_pixmap.scaledToWidth(new_width, Qt.TransformationMode.SmoothTransformation)
         self.ui.lbl_image.setPixmap(scaled_pixmap)
 
@@ -2275,40 +2072,31 @@ class MediaExplorerApp(QMainWindow):
                 except AttributeError:
                     pass
 
-        # 🔹 Hide the ENTIRE image viewer container (fixes the broken scrollbar overlap!)
         self.ui.image_view_container.hide()
         self.ui.lbl_placeholder.hide()
 
-        # 🔹 Show video container
         self.ui.video_container.show()
 
-        # 🔹 Stop any currently playing media
         self.media_player.stop()
 
-        # 🔹 Load new video
         self.media_player.setSource(QUrl.fromLocalFile(path))
 
-        # 🔹 Ensure stable playback speed
         self.media_player.setPlaybackRate(1.0)
 
-        # 🔹 Start playback
         self.media_player.play()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Left:
-            # Always navigate the gallery by default
             self.play_previous()
             event.accept()
             return
 
         elif event.key() == Qt.Key.Key_Right:
-            # Always navigate the gallery by default
             self.play_next()
             event.accept()
             return
 
         elif event.key() == Qt.Key.Key_Space:
-            # Only toggle play/pause if a video is actually on screen
             if self.ui.video_container.isVisible():
                 self.toggle_play_pause()
             event.accept()
@@ -2322,16 +2110,13 @@ class MediaExplorerApp(QMainWindow):
             self.load_media(path)                
 
     def on_search_bar_typed(self, text):
-        # Instead of searching immediately, start/reset the 300ms timer
         self.search_timer.start()
 
     def force_instant_search(self):
-        # If the user hits "Enter", cancel the timer and search instantly
         self.search_timer.stop()
         self.process_search()
 
     def on_gallery_scroll(self, value):
-        # Only trigger if we are searching a database
         if not getattr(self, 'db_connection', None):
             return
             
@@ -2341,11 +2126,9 @@ class MediaExplorerApp(QMainWindow):
 
         scrollbar = self.ui.gallery_section.list_widget.verticalScrollBar()
         
-        # Safely check if we are already fetching
         if getattr(self, 'is_fetching_data', False):
             return
             
-        # If the user scrolls within 100 pixels of the bottom, load the next chunk!
         if value >= scrollbar.maximum() - 100:
             self.is_fetching_data = True
             
@@ -2353,7 +2136,6 @@ class MediaExplorerApp(QMainWindow):
             self.ui.lbl_placeholder.show()
             filter_type = self.ui.gallery_section.filter_combo.currentText() if hasattr(self.ui.gallery_section, 'filter_combo') else "All"
             
-            # 🔹 PERFORMANCE: Dynamic Scroll Batch Limits
             perf_mode = getattr(self, "current_perf_mode", "balanced")
             if perf_mode == "high":
                 scroll_limit = 200
@@ -2373,19 +2155,16 @@ class MediaExplorerApp(QMainWindow):
             self.db_search_worker.search_finished.connect(self.on_db_search_finished)
             self.db_search_worker.start()
             
-            # Increase offset AFTER launching the worker so the NEXT scroll fetches the correct batch
             self.current_search_offset += scroll_limit
 
     def process_search(self):
         text = self.ui.search_bar.text()
         search_text = text.strip().lower()
         
-        # 🔹 Start the 2-second countdown to clear the player!
         self.clear_player_timer.start(200) 
 
         if getattr(self, 'db_connection', None) and hasattr(self, 'current_db_path'):
             
-            # 🔹 ANTI-BLINK FIX: Only show "Searching..." if the screen is already empty!
             if not self.ui.video_container.isVisible() and not self.ui.image_view_container.isVisible():
                 self.ui.lbl_placeholder.setText("⏳ Searching...")
                 self.ui.lbl_placeholder.show()
@@ -2393,28 +2172,20 @@ class MediaExplorerApp(QMainWindow):
             if getattr(self, 'db_search_worker', None) and self.db_search_worker.isRunning():
                 self.db_search_worker.stop()
                 
-                # ==========================================
-                # 🔹 ANTI-FREEZE FIX: NO MORE .wait()
-                # ==========================================
-                # We orphan the old thread so it doesn't freeze the UI while SQL finishes.
                 if not hasattr(self, 'zombie_workers'):
                     self.zombie_workers = []
                 
                 old_worker = self.db_search_worker
                 self.zombie_workers.append(old_worker)
                 
-                # Let it die quietly and remove itself from RAM when finished
                 old_worker.finished.connect(
                     lambda w=old_worker: self.zombie_workers.remove(w) if w in getattr(self, 'zombie_workers', []) else None
                 )
-                # ==========================================
 
-            # --- START FRESH ---
-            self.current_search_id += 1  # Invalidate any old background loops!
+            self.current_search_id += 1
             
             filter_type = self.ui.gallery_section.filter_combo.currentText() if hasattr(self.ui.gallery_section, 'filter_combo') else "All"
 
-            # 🔹 PERFORMANCE: Dynamic Initial Load Limits
             perf_mode = getattr(self, "current_perf_mode", "balanced")
             if perf_mode == "high":
                 initial_limit = 1000
@@ -2423,10 +2194,8 @@ class MediaExplorerApp(QMainWindow):
             else:
                 initial_limit = 300
                 
-            # 🔹  Set the offset to exactly where the next batch should START
             self.current_search_offset = initial_limit 
 
-            # Blast the initial images instantly
             self.db_search_worker = DatabaseSearchWorker(
                 self.current_db_path, 
                 search_text, 
@@ -2443,7 +2212,6 @@ class MediaExplorerApp(QMainWindow):
 
 
     def on_db_search_finished(self, results, folders_map, search_text, is_appending, search_id):
-        # 1. GHOST PROTECTION: If the user typed something new, discard this data!
         if search_id != self.current_search_id:
             return 
 
@@ -2461,7 +2229,6 @@ class MediaExplorerApp(QMainWindow):
                 self.ui.gallery_section.list_widget.clear()
             return
 
-        # Clear UI ONLY if this is the very first batch (offset 0)
         if not is_appending:
             self.ui.gallery_section.list_widget.clear()
             self.thumbnail_map.clear()
@@ -2469,7 +2236,6 @@ class MediaExplorerApp(QMainWindow):
             self.vid_thumb_worker.clear_queue()
             self.thumb_worker.resume()
 
-        # Virtual Tree Setup
         search_root = None
         for row in range(self.model.rowCount()):
             item = self.model.item(row)
@@ -2495,15 +2261,12 @@ class MediaExplorerApp(QMainWindow):
         files_for_img_thumbs = []
         files_for_vid_thumbs = []
 
-        # 🔹 SAVE SCROLL POSITION & SELECTION 🔹
         scrollbar = self.ui.gallery_section.list_widget.verticalScrollBar()
         saved_scroll_pos = scrollbar.value()
         saved_row = self.ui.gallery_section.list_widget.currentRow()
 
-        # 🔹 FREEZE THE UI: Stop redrawing the screen until all items are loaded
         self.ui.gallery_section.list_widget.setUpdatesEnabled(False)
 
-        # Append the new chunk to the Gallery
         for file_path, file_name, media_type in results:
             is_vid = media_type == "video" or (media_type == "image" and any(file_name.lower().endswith(e) for e in self.clean_vid_exts))
             is_gallery = media_type == "gallery"
@@ -2529,21 +2292,16 @@ class MediaExplorerApp(QMainWindow):
             self.thumbnail_map[file_path] = item
             self.ui.gallery_section.list_widget.addItem(item)
 
-        # 🔹 UNFREEZE THE UI: Draw them all at exactly the same time!
         self.ui.gallery_section.list_widget.setUpdatesEnabled(True)
         
-        # 🔹 RESTORE SCROLL POSITION & SELECTION 🔹
         if is_appending:
             scrollbar.setValue(saved_scroll_pos)
             
             if saved_row >= 0:
-                # Silently re-highlight the exact image we were on
                 self.ui.gallery_section.list_widget.setCurrentRow(saved_row)
                 
-            # 🔹 BUG FIX: Force the keyboard to stay connected to the gallery!
             self.ui.gallery_section.list_widget.setFocus()
 
-        # Append to the Tree View
         for folder_name, files in folders_map.items():
             existing_folder = None
             if search_root:
@@ -2576,22 +2334,19 @@ class MediaExplorerApp(QMainWindow):
         if files_for_img_thumbs: self.thumb_worker.add_to_queue(files_for_img_thumbs)
         if files_for_vid_thumbs: self.vid_thumb_worker.add_to_queue(files_for_vid_thumbs)
 
-        # 🔹 UNLOCK THE SCROLLBAR: Let the user load more only when they scroll!
         self.is_fetching_data = False
 
     def render_search_batch(self):
-        # Abort if the user typed something new while we were rendering
         if getattr(self, 'cancel_search_rendering', False):
             return 
             
-        items_to_render = 100 # Adjust this if you want faster/slower batches
+        items_to_render = 100
         rendered = 0
         
         files_for_img_thumbs = []
         files_for_vid_thumbs = []
         
-        # 1. Render a chunk of Gallery Items
-        self.ui.gallery_section.list_widget.setUpdatesEnabled(False) # 🔹 FREEZE UI
+        self.ui.gallery_section.list_widget.setUpdatesEnabled(False)
 
         while self.search_render_results and rendered < items_to_render:
             file_path, file_name, media_type = self.search_render_results.pop(0)
@@ -2620,10 +2375,8 @@ class MediaExplorerApp(QMainWindow):
             self.ui.gallery_section.list_widget.addItem(item)
             rendered += 1
             
-        self.ui.gallery_section.list_widget.setUpdatesEnabled(True) # 🔹 UNFREEZE UI
+        self.ui.gallery_section.list_widget.setUpdatesEnabled(True)
 
-        # 2. Render a chunk of Tree Folders
-        # We render 1 whole folder per batch to prevent weird split-folder rendering issues
         if self.search_render_folders and rendered < items_to_render:
             folder_name, files = self.search_render_folders.pop(0)
             folder_item = QStandardItem(f"{folder_name} ({len(files)} items)")
@@ -2642,20 +2395,15 @@ class MediaExplorerApp(QMainWindow):
             self.search_render_root.appendRow(folder_item)
             rendered += len(files) 
 
-        # 3. Dispatch thumbnails to the background worker for this batch
         if files_for_img_thumbs: self.thumb_worker.add_to_queue(files_for_img_thumbs)
         if files_for_vid_thumbs: self.vid_thumb_worker.add_to_queue(files_for_vid_thumbs)
 
-        # 4. Check if we are done or need another loop
         if self.search_render_results or self.search_render_folders:
-            # Update the loading text to show progress
             left = len(self.search_render_results)
             self.ui.lbl_placeholder.setText(f"⏳ Rendering... {left} remaining")
             
-            # Run this function again in 5 milliseconds
             QTimer.singleShot(5, self.render_search_batch)
         else:
-            # Finished! Hide the placeholder and expand the tree
             self.ui.lbl_placeholder.hide()
             proxy_index = self.proxy_model.mapFromSource(self.search_render_root.index())
             self.ui.tree_view.expand(proxy_index)
@@ -2684,7 +2432,6 @@ class MediaExplorerApp(QMainWindow):
         event.acceptProposedAction()            
 
     def flash_button_icon(self, button, icon_name, duration=150):
-        # 🔹 Change "Svg2" to "svg2" and "Svg" to "svg" if your real folders are lowercase!
         active_icon = QIcon(os.path.join(self.asset_dir, "svg2", f"{icon_name}.svg"))
         default_icon = QIcon(os.path.join(self.asset_dir, "svg", f"{icon_name}.svg"))
 
@@ -2692,9 +2439,6 @@ class MediaExplorerApp(QMainWindow):
         QTimer.singleShot(duration, lambda: button.setIcon(default_icon))  
 
 
-    # ==========================================
-    # DATABASE LOGIC
-    # ==========================================
     def auto_load_database(self):
         from PyQt6.QtCore import QSettings
         from PyQt6.QtWidgets import QDialog, QMessageBox
@@ -2703,18 +2447,14 @@ class MediaExplorerApp(QMainWindow):
         settings = QSettings("MediaNest", "AppConfig")
         db_folder = settings.value("db_folder_path", "", type=str)
         
-        # 1. If they haven't set up the workspace, show the Setup Popup!
         if not db_folder or not os.path.exists(db_folder):
             setup_window = FirstTimeSetupDialog(self)
             
             if setup_window.exec() == QDialog.DialogCode.Accepted:
-                # User successfully finished setup. Grab the new path!
                 db_folder = settings.value("db_folder_path", "", type=str)
             else:
-                # User clicked 'Cancel' or 'X', just abort silently
                 return
 
-        # 2. Path exists (or was just created), load the database!
         db_path = os.path.join(db_folder, "library.db")
         if os.path.exists(db_path):
             self.connect_to_database(db_path)
@@ -2738,7 +2478,6 @@ class MediaExplorerApp(QMainWindow):
             pass
             
         try:
-            # Also try to pull from characters.db!
             char_db_path = os.path.join(self.current_db_folder, "characters.db")
             if os.path.exists(char_db_path):
                 char_conn = sqlite3.connect(char_db_path)
@@ -2766,7 +2505,6 @@ class MediaExplorerApp(QMainWindow):
         if hasattr(self, 'tag_completer'):
             self.tag_completer.model().setStringList(all_tags)
             
-        # Also update pagination tab if it exists
         try:
             if hasattr(self, 'settings_dialog') and hasattr(self.settings_dialog, 'tab_pagination'):
                 if hasattr(self.settings_dialog.tab_pagination, 'tag_completer'):
@@ -2782,31 +2520,24 @@ class MediaExplorerApp(QMainWindow):
             self.current_db_path = db_path
             self.db_connection = sqlite3.connect(db_path, check_same_thread=False)
             
-            # ==========================================
-            # LOAD TAGS AND SETUP AUTOCOMPLETE
-            # ==========================================
             cursor = self.db_connection.cursor()
             
-            # --- Initialize Pagination Tables (For existing databases) ---
             cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangas (manga_id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, cover_image TEXT)")
             cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangaPages (manga_id INTEGER, image_path TEXT, page_number INTEGER, PRIMARY KEY (manga_id, page_number))")
             cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangaTags (manga_id INTEGER, tag_name TEXT, PRIMARY KEY (manga_id, tag_name))")
             self.db_connection.commit()
             
             cursor.execute("SELECT tag_name FROM Tags")
-            # Fetch all unique tags
             all_tags = set([row[0] for row in cursor.fetchall()])
             
-            # 🔹 Also fetch artists from MangaGalleries so they act as tags!
             try:
                 cursor.execute("SELECT DISTINCT artist FROM MangaGalleries WHERE artist IS NOT NULL AND artist != ''")
                 artists = [row[0] for row in cursor.fetchall()]
                 all_tags.update(artists)
             except sqlite3.OperationalError:
-                pass # In case MangaGalleries table doesn't exist yet
+                pass
                 
             try:
-                # Also try to pull from characters.db!
                 char_db_path = os.path.join(self.current_db_folder, "characters.db")
                 if os.path.exists(char_db_path):
                     char_conn = sqlite3.connect(char_db_path)
@@ -2818,7 +2549,6 @@ class MediaExplorerApp(QMainWindow):
             except Exception:
                 pass
                 
-            # 🔹 Also fetch custom manga tags and titles!
             try:
                 cursor.execute("SELECT DISTINCT tag_name FROM CustomMangaTags")
                 custom_tags = [row[0] for row in cursor.fetchall()]
@@ -2834,21 +2564,15 @@ class MediaExplorerApp(QMainWindow):
             
             self.tag_completer = MultiTagCompleter(all_tags, self)
             
-            # ==========================================
-            # SCALE-AWARE DROPDOWN STYLING
-            # ==========================================
-            # Check the current scale so we can prevent dotted/blurry text!
             try:
                 current_scale = float(os.environ.get("QT_SCALE_FACTOR", "1.0"))
                 if current_scale < 1.0:
-                    # If scaled down, make the font bolder and slightly larger to survive the shrink
                     font_style = "font-size: 14px; font-weight: bold;"
                 else:
                     font_style = "font-size: 13px; font-weight: normal;"
             except Exception:
                 font_style = "font-size: 13px; font-weight: normal;"
 
-            # Style the dropdown menu (using an f-string to inject our dynamic font)
             self.tag_completer.popup().setStyleSheet(f"""
                 QListView {{
                     background-color: #252526;
@@ -2865,12 +2589,9 @@ class MediaExplorerApp(QMainWindow):
                     background-color: #007acc;
                 }}
             """)
-            # ==========================================
             
-            # Attach it to the search bar
             self.ui.search_bar.setCompleter(self.tag_completer)
 
-            # Change the button to show it was successful!
             self.ui.btn_load_db.setText(" DB ACTIVE")
             self.ui.btn_load_db.setStyleSheet("""
                 QPushButton {

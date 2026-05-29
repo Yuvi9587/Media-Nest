@@ -1,4 +1,3 @@
-# Src/Ui/theme.py
 
 VSCODE_DARK_THEME = """
 QMainWindow { background-color: #1e1e1e; }

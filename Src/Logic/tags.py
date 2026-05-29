@@ -18,9 +18,6 @@ from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 from Src.Logic.paths import resource_path
 
-# =========================================================
-# 🖼️ RESPONSIVE IMAGE & GIF LABEL
-# =========================================================
 class ResponsiveImageLabel(QLabel):
     """A smart label that dynamically resizes images AND GIFs to fit any screen."""
     def __init__(self, text=""):
@@ -36,7 +33,6 @@ class ResponsiveImageLabel(QLabel):
         self.clear_image("")
         ext = os.path.splitext(file_path)[1].lower()
         
-        # natively handle animated GIFs
         if ext == '.gif':
             self._movie = QMovie(file_path)
             self.setMovie(self._movie)
@@ -77,23 +73,15 @@ class ResponsiveImageLabel(QLabel):
             self._scale_movie()
         super().resizeEvent(event)
 
-# =========================================================
-# 🎚️ SAFE JUMP SLIDER (Prevents Seeking Freezes)
-# =========================================================
 class SafeJumpSlider(QSlider):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            # Calculate where the user clicked on the bar
             val = self.minimum() + ((self.maximum() - self.minimum()) * event.position().x()) / self.width()
             self.setValue(int(val))
-            # Emit the move signal so our media player catches it
             self.sliderMoved.emit(int(val))
             event.accept()
         super().mousePressEvent(event)
 
-# =========================================================
-# 🎬 UNIVERSAL MEDIA VIEWER (Wraps Image/GIF/Video seamlessly)
-# =========================================================
 class UniversalMediaViewer(QWidget):
     def __init__(self, default_text="Select a file from the Inbox to work on", parent=None):
         super().__init__(parent)
@@ -103,11 +91,9 @@ class UniversalMediaViewer(QWidget):
         self.stack = QStackedWidget()
         self.layout.addWidget(self.stack)
         
-        # --- Index 0: Image & GIF Player ---
         self.image_label = ResponsiveImageLabel(default_text)
         self.stack.addWidget(self.image_label)
         
-        # --- Index 1: Video Player + Controls ---
         self.video_container = QWidget()
         self.video_layout = QVBoxLayout(self.video_container)
         self.video_layout.setContentsMargins(0, 0, 0, 0)
@@ -116,7 +102,6 @@ class UniversalMediaViewer(QWidget):
         self.video_widget = QVideoWidget()
         self.video_layout.addWidget(self.video_widget, stretch=1)
         
-        # --- Build the Timeline (Scrubber) ---
         self.timeline_layout = QHBoxLayout()
         self.lbl_current_time = QLabel("00:00")
         self.lbl_total_time = QLabel("00:00")
@@ -137,7 +122,6 @@ class UniversalMediaViewer(QWidget):
         self.timeline_layout.addWidget(self.lbl_total_time)
         self.video_layout.addLayout(self.timeline_layout)
 
-        # --- Build the custom control bar ---
         self.controls_layout = QHBoxLayout()
         self.controls_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
@@ -162,14 +146,12 @@ class UniversalMediaViewer(QWidget):
         self.video_layout.addLayout(self.controls_layout)
         self.stack.addWidget(self.video_container)
 
-        # --- Media Player Setup ---
         self.media_player = QMediaPlayer()
         self.audio_output = QAudioOutput()
         self.audio_output.setVolume(0.5) 
         self.media_player.setAudioOutput(self.audio_output)
         self.media_player.setVideoOutput(self.video_widget)
         
-        # --- Wiring Up the Signals ---
         self.media_player.mediaStatusChanged.connect(self._check_loop)
         self.media_player.playbackStateChanged.connect(self._update_play_button)
         self.media_player.positionChanged.connect(self._update_position)
@@ -181,7 +163,6 @@ class UniversalMediaViewer(QWidget):
         self.btn_skip_back.clicked.connect(lambda: self.skip(-10000))
         self.btn_skip_forward.clicked.connect(lambda: self.skip(10000))
 
-    # --- Video Control & Timeline Logic ---
     def _format_time(self, ms):
         """Converts milliseconds into MM:SS or HH:MM:SS format"""
         s = round(ms / 1000)
@@ -192,7 +173,6 @@ class UniversalMediaViewer(QWidget):
         return f"{m:02}:{s:02}"
 
     def _update_position(self, position):
-        # Only update the slider if the user isn't currently dragging it
         if not self.slider_progress.isSliderDown():
             self.slider_progress.setValue(position)
         self.lbl_current_time.setText(self._format_time(position))
@@ -203,17 +183,13 @@ class UniversalMediaViewer(QWidget):
 
     def _set_position(self, position):
         """Safely seeks by temporarily pausing the video to free up the decoder."""
-        # 1. Check if the video is currently playing
         was_playing = self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
         
-        # 2. Pause the player to prevent the decoder from locking up
         if was_playing:
             self.media_player.pause()
             
-        # 3. Safely jump to the new timestamp
         self.media_player.setPosition(position)
         
-        # 4. Instantly resume playing if it was playing before the click
         if was_playing:
             self.media_player.play()
 
@@ -241,11 +217,9 @@ class UniversalMediaViewer(QWidget):
         new_pos = max(0, min(new_pos, max_pos)) 
         self._set_position(new_pos)
 
-    # --- Routing Logic ---
     def set_image(self, file_path):
         self.clear_image("") 
         
-        # 🔹 FIX: Validate file exists and is not empty before playing
         try:
             if not os.path.exists(file_path) or os.path.getsize(file_path) < 100:
                 self.clear_image("Error: File is empty or corrupted.")
@@ -271,9 +245,6 @@ class UniversalMediaViewer(QWidget):
         self.stack.setCurrentIndex(0)
         self.image_label.clear_image(text)
 
-# =========================================================
-# ☁️ CLOUD SYNC THREAD
-# =========================================================
 class CloudSyncThread(QThread):
     progress = pyqtSignal(int, int)
     log_msg = pyqtSignal(str)
@@ -299,7 +270,6 @@ class CloudSyncThread(QThread):
             hash_list_str = ",".join(batch)
 
             try:
-                # Ask Supabase: Do you have any of these hashes in the global archive?
                 req_url = f"{url}?select=hash,tags&hash=in.({hash_list_str})"
                 response = requests.get(req_url, headers=headers, timeout=10)
                 
@@ -319,9 +289,6 @@ class CloudSyncThread(QThread):
 
         self.finished_signal.emit(results)
 
-# =========================================================
-# 📥 BACKGROUND THREADS
-# =========================================================
 class DownloadThread(QThread):
     progress = pyqtSignal(int)
     status = pyqtSignal(str)
@@ -392,7 +359,6 @@ class ImportFolderThread(QThread):
                 if self.isInterruptionRequested(): break
                 hasher = hashlib.md5()
                 try:
-                    # 1. Calculate Exact MD5 Hash
                     with open(file_path, 'rb') as f:
                         while chunk := f.read(8192):
                             hasher.update(chunk)
@@ -408,17 +374,14 @@ class ImportFolderThread(QThread):
                     else:
                         file_name = os.path.basename(file_path)
                         
-                        # 🔹 Calculate Perceptual Hash (phash) for Images!
                         phash_value = None
                         if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif')):
                             try:
-                                # Open the image and calculate its visual fingerprint
                                 with Image.open(file_path) as img:
                                     phash_value = str(imagehash.phash(img, hash_size=16))
                             except Exception as e:
                                 self.log_msg.emit(f"IMPORT WARN: Could not calculate phash for {file_name}")
 
-                        # 🔹 UPDATE: Insert both the exact hash AND the phash into the database
                         cursor.execute("INSERT INTO tagless (hash, file_path, file_name, phash) VALUES (?, ?, ?, ?)", 
                                        (file_hash, file_path, file_name, phash_value))
                         imported += 1
@@ -436,9 +399,6 @@ class ImportFolderThread(QThread):
             self.log_msg.emit(f"IMPORT CRASH: {e}")
             self.finished_signal.emit(-1, 0)
 
-# =========================================================
-# 📥 DOWNLOAD DIALOG UI (The Popup)
-# =========================================================
 class ModelDownloadDialog(QDialog):
     def __init__(self, dest_dir, parent=None):
         super().__init__(parent)
@@ -522,9 +482,6 @@ class ModelDownloadDialog(QDialog):
             self.reject()
 
 
-# =========================================================
-# 🎛️ MAIN TAB UI (REMASTERED 3-COLUMN UNIFIED LAYOUT)
-# =========================================================
 class TagManagerTab(QWidget):
     log_signal = pyqtSignal(str)
 
@@ -537,7 +494,7 @@ class TagManagerTab(QWidget):
         
         self.tag_completer_model = QStringListModel()
         self.known_gelbooru_chars = set() 
-        self.pending_cloud_matches = {} # Tracks cloud tags in memory
+        self.pending_cloud_matches = {}
         
         self.log_signal.connect(self.append_log_to_console)
 
@@ -559,9 +516,6 @@ class TagManagerTab(QWidget):
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         
-        # =========================================================
-        # COLUMN 1: THE INBOX QUEUE
-        # =========================================================
         col1_widget = QWidget()
         col1_layout = QVBoxLayout(col1_widget)
         col1_layout.setContentsMargins(0, 0, 5, 0)
@@ -569,7 +523,6 @@ class TagManagerTab(QWidget):
         self.inbox_group = QGroupBox("Tag Management Index (Inbox Queue)")
         inbox_layout = QVBoxLayout()
         
-        # --- NEW: Search Bar for Existing Library ---
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Search existing tags (e.g., 'outdoor') or leave blank for Inbox...")
         self.search_bar.setStyleSheet("padding: 8px; border-radius: 4px; background-color: #252526; color: white; border: 1px solid #3e3e42;")
@@ -579,7 +532,6 @@ class TagManagerTab(QWidget):
         self.search_completer.setModel(self.tag_completer_model)
         self.search_bar.setCompleter(self.search_completer)
         inbox_layout.addWidget(self.search_bar)
-        # --------------------------------------------
         
         self.btn_import_folder = QPushButton("Import External Folder")
         self.btn_import_folder.setAutoDefault(False)
@@ -610,9 +562,6 @@ class TagManagerTab(QWidget):
         self.inbox_group.setLayout(inbox_layout)
         col1_layout.addWidget(self.inbox_group)
 
-        # =========================================================
-        # COLUMN 2: THE TAGGING ENGINE (UNIFIED)
-        # =========================================================
         col2_widget = QWidget()
         col2_layout = QVBoxLayout(col2_widget)
         col2_layout.setContentsMargins(5, 0, 5, 0)
@@ -673,9 +622,6 @@ class TagManagerTab(QWidget):
         
         col2_layout.addWidget(active_tags_group)
 
-        # =========================================================
-        # COLUMN 3: MEDIA WORKSPACE
-        # =========================================================
         col3_widget = QWidget()
         col3_layout = QVBoxLayout(col3_widget)
         col3_layout.setContentsMargins(5, 0, 0, 0)
@@ -691,7 +637,6 @@ class TagManagerTab(QWidget):
         self.console.setStyleSheet("background-color: #0c0c0c; color: #4CAF50; font-family: Consolas, monospace; font-size: 11px; border: 1px solid #3e3e42; border-radius: 4px;")
         workspace_layout.addWidget(self.console, stretch=3)
         
-        # 🔹 DYNAMIC BUTTON LAYOUT 🔹
         self.workspace_btn_layout = QHBoxLayout()
         
         self.btn_approve_all_cloud = QPushButton("Batch Approve All")
@@ -715,11 +660,10 @@ class TagManagerTab(QWidget):
         workspace_group.setLayout(workspace_layout)
         col3_layout.addWidget(workspace_group)
 
-        # Build Splitter
         self.splitter.addWidget(col1_widget)
         self.splitter.addWidget(col2_widget)
         self.splitter.addWidget(col3_widget)
-        self.splitter.setSizes([250, 300, 600]) # Optimal ratio for 3 columns
+        self.splitter.setSizes([250, 300, 600])
 
         main_layout.addWidget(self.splitter)
 
@@ -742,17 +686,13 @@ class TagManagerTab(QWidget):
         db_folder = settings.value("db_folder_path", "", type=str)
         library_db = os.path.join(db_folder, "library.db")
         
-        # 🔹 SMART DB LOCATOR 🔹
-        # 1. Check inside the designated workspace folder first
         characters_db = os.path.join(db_folder, "characters.db")
         
         if not os.path.exists(characters_db):
-            # Check for alternative naming just in case
             alt_db = os.path.join(db_folder, "character.db")
             if os.path.exists(alt_db):
                 characters_db = alt_db
             else:
-                # 2. Fallback: Check the root folder next to the .exe
                 if getattr(sys, 'frozen', False):
                     app_dir = os.path.dirname(sys.executable)
                 else:
@@ -764,9 +704,6 @@ class TagManagerTab(QWidget):
                     
         return library_db, characters_db
 
-    # =========================================================
-    # 📂 BACKGROUND FOLDER IMPORT
-    # =========================================================
     def import_external_folder(self):
         folder_path = QFileDialog.getExistingDirectory(self, "Select External Folder to Import")
         if not folder_path: return
@@ -784,9 +721,6 @@ class TagManagerTab(QWidget):
         self.import_worker.finished_signal.connect(self.on_import_finished)
         self.import_worker.start()
 
-    # =========================================================
-    # ⚡ REAL-TIME UI STREAMING
-    # =========================================================
     def add_single_streamed_item(self, file_name, file_path, file_hash):
         """Catches items from the background thread and injects them into the UI instantly."""
         creator_folder = os.path.basename(os.path.dirname(file_path))
@@ -804,7 +738,6 @@ class TagManagerTab(QWidget):
         item.setData(Qt.ItemDataRole.UserRole, {"path": file_path, "hash": file_hash})
         self.inbox_list_widget.addItem(item)
         
-        # Make the list automatically scroll down so the user can watch them fly in!
         self.inbox_list_widget.scrollToBottom()
 
     def on_import_finished(self, imported, skipped):
@@ -812,9 +745,6 @@ class TagManagerTab(QWidget):
         self.import_progress.hide()
         if imported != -1: self.refresh_tagless_inbox()
 
-    # =========================================================
-    # CORE LOGIC
-    # =========================================================
     def refresh_global_tags(self):
         library_db, characters_db = self.get_db_paths()
         all_tags = []
@@ -841,12 +771,10 @@ class TagManagerTab(QWidget):
                 if tables:
                     target_table = "characters" if "characters" in tables else tables[0]
                     
-                    # 🔹 SMART COLUMN DETECTION: Safely check what columns actually exist
                     cursor.execute(f"PRAGMA table_info({target_table})")
                     columns = [col[1] for col in cursor.fetchall()]
                     
                     if columns:
-                        # Guess the best columns for names and aliases
                         col_name = "character_name" if "character_name" in columns else columns[0]
                         col_alias = "raw_string" if "raw_string" in columns else (columns[1] if len(columns) > 1 else None)
                         
@@ -867,7 +795,6 @@ class TagManagerTab(QWidget):
                                             char_tags.append(clean_alias)
                                             self.known_gelbooru_chars.add(clean_alias)
                         else:
-                            # Fallback if the database only has 1 column
                             cursor.execute(f"SELECT {col_name} FROM {target_table}")
                             rows = cursor.fetchall()
                             for c_name in rows:
@@ -878,7 +805,6 @@ class TagManagerTab(QWidget):
                                     
                 conn.close()
             except Exception as e: 
-                # Print the error to the console instead of failing silently!
                 self.log(f"WARN: Could not read character database: {e}")
 
         combined_set = set(all_tags + char_tags)
@@ -894,7 +820,6 @@ class TagManagerTab(QWidget):
             conn = sqlite3.connect(library_db)
             cursor = conn.cursor()
             
-            # 1. 🔹 AUTO-CLEAN DUPLICATES: Keep only the first entry for each hash
             cursor.execute("""
                 DELETE FROM tagless 
                 WHERE rowid NOT IN (
@@ -905,7 +830,6 @@ class TagManagerTab(QWidget):
             """)
             conn.commit()
 
-            # 2. Fetch the clean list
             cursor.execute("SELECT file_name, file_path, hash FROM tagless ORDER BY file_name ASC")
             rows = cursor.fetchall()
             
@@ -914,7 +838,6 @@ class TagManagerTab(QWidget):
             
             for file_name, file_path, file_hash in rows:
                 
-                # 3. 🔹 VERIFY FILE EXISTS ON DISK
                 if not file_path or not os.path.exists(file_path):
                     invalid_hashes.append(file_hash)
                     continue
@@ -935,7 +858,6 @@ class TagManagerTab(QWidget):
                 item.setData(Qt.ItemDataRole.UserRole, {"path": file_path, "hash": file_hash})
                 self.inbox_list_widget.addItem(item)
                 
-            # 4. 🔹 DELETE GHOST FILES FROM DATABASE
             if invalid_hashes:
                 for h in invalid_hashes:
                     cursor.execute("DELETE FROM tagless WHERE hash = ?", (h,))
@@ -961,13 +883,11 @@ class TagManagerTab(QWidget):
         cursor = conn.cursor()
 
         if not search_text:
-            # If search is blank, load the normal Inbox Queue
             self.inbox_group.setTitle("Tag Management Index (Inbox Queue)")
             self.refresh_tagless_inbox()
             conn.close()
             return
         
-        # If searching, find all files that have this tag in the main library
         self.inbox_group.setTitle(f"Tag Management Index (Results for: {search_text})")
         cursor.execute("""
             SELECT i.hash, i.file_path, i.file_name 
@@ -993,7 +913,6 @@ class TagManagerTab(QWidget):
         self.file_tag_list.clear()
         self.input_add_tag.clear()
 
-        # 🔹 FETCH EXISTING TAGS FROM DATABASE
         library_db, _ = self.get_db_paths()
         if os.path.exists(library_db):
             conn = sqlite3.connect(library_db)
@@ -1009,15 +928,14 @@ class TagManagerTab(QWidget):
             
             for row in cursor.fetchall():
                 tag_id, tag_name = row
-                item = QListWidgetItem(tag_name) # Removed the X
-                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable) # Adds Checkbox
-                item.setCheckState(Qt.CheckState.Unchecked) # Defaults to unchecked
+                item = QListWidgetItem(tag_name)
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Unchecked)
                 item.setForeground(QColor("#ff6b6b"))
                 item.setData(Qt.ItemDataRole.UserRole, {"tag_id": tag_id, "tag_name": tag_name, "is_saved": True})
                 self.file_tag_list.addItem(item)
             conn.close()
 
-        # 🔹 SMART UI: Inject Cloud tags directly into Active list
         if file_hash in self.pending_cloud_matches:
             for tag in self.pending_cloud_matches[file_hash]:
                 item = QListWidgetItem(f"{tag}")
@@ -1027,23 +945,19 @@ class TagManagerTab(QWidget):
                 item.setForeground(QColor("#b388ff"))
                 self.file_tag_list.addItem(item)
                 
-        # 🔹 DYNAMIC BUTTONS: Handle all 3 states
         if not is_in_tagless:
-            # State 1: File is already in the main library
             self.btn_save_archive.setEnabled(False)
             self.btn_save_archive.setText("Already Archived")
             self.btn_save_archive.setStyleSheet("QPushButton { background-color: #2d2d2d; color: #666666; font-weight: bold; font-size: 14px; border-radius: 4px; border: 1px solid #3e3e42; }")
             self.btn_approve_all_cloud.hide()
             
         elif file_hash in self.pending_cloud_matches:
-            # State 2: File is new AND has Cloud matches
             self.btn_save_archive.setEnabled(True)
             self.btn_save_archive.setText("Approve Selected")
             self.btn_save_archive.setStyleSheet("QPushButton { background-color: #8957e5; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #9a68f6; }")
             self.btn_approve_all_cloud.show()
             
         else:
-            # State 3: File is new (Normal Inbox Queue)
             self.btn_save_archive.setEnabled(True)
             self.btn_save_archive.setText("Archive and Save File")
             self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
@@ -1059,21 +973,18 @@ class TagManagerTab(QWidget):
         tag_value = self.input_add_tag.text().strip().lower().replace(" ", "_")
         if not tag_value: return
         
-        # 1. Safely gather all existing tags to prevent duplicates
         existing_items = []
         for i in range(self.file_tag_list.count()):
             t = self.file_tag_list.item(i).text()
             t = t.replace("☁️ ", "").replace("☁️", "").strip()
             existing_items.append(t)
 
-        # 2. Add the tag if it's truly unique
         if tag_value not in existing_items: 
             item = QListWidgetItem(tag_value)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable) 
             item.setCheckState(Qt.CheckState.Unchecked)
             self.file_tag_list.addItem(item)
             
-            # 3. Wake up the Save button if this is an archived file!
             self.wake_up_save_button()
             
         self.input_add_tag.clear()
@@ -1082,7 +993,6 @@ class TagManagerTab(QWidget):
         """Finds all checked tags and deletes them from the UI and Database."""
         if not self.current_file_hash: return
         
-        # 1. Gather all checked items
         items_to_delete = []
         for i in range(self.file_tag_list.count()):
             item = self.file_tag_list.item(i)
@@ -1090,9 +1000,8 @@ class TagManagerTab(QWidget):
                 items_to_delete.append(item)
                 
         if not items_to_delete:
-            return # Nothing was checked!
+            return
 
-        # 2. Ask for confirmation once for all tags
         reply = QMessageBox.question(self, "Delete Tags", 
                                      f"Are you sure you want to delete {len(items_to_delete)} selected tags?",
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -1102,16 +1011,13 @@ class TagManagerTab(QWidget):
             conn = sqlite3.connect(library_db)
             cursor = conn.cursor()
             
-            # 3. Loop through and delete
             for item in items_to_delete:
                 data = item.data(Qt.ItemDataRole.UserRole)
                 
-                # If it's a saved tag, permanently remove it from the database
                 if isinstance(data, dict) and data.get("is_saved"):
                     tag_id = data["tag_id"]
                     cursor.execute("DELETE FROM ImageTags WHERE hash = ? AND tag_id = ?", (self.current_file_hash, tag_id))
                 
-                # Remove it from the UI list
                 self.file_tag_list.takeItem(self.file_tag_list.row(item))
                 
             conn.commit()
@@ -1141,15 +1047,12 @@ class TagManagerTab(QWidget):
                 new_tags = []
                 if result.get("best_char"): new_tags.append(result["best_char"].lower().replace(" ", "_"))
                 
-                # 🔹 LOWERED THRESHOLD: 0.12 (12%) lets many more tags pass through!
                 for tag_name, score in result.get("top_tags", []):
                     if score >= 0.12: 
                         new_tags.append(tag_name.lower().replace(" ", "_"))
 
-                # 🔹 STRICT CUTOFF: Force the final list to never exceed 31 tags
                 new_tags = new_tags[:31]
 
-                # 🔹 SMART DUPLICATE PREVENTION
                 existing_items = []
                 for i in range(self.file_tag_list.count()):
                     t = self.file_tag_list.item(i).text()
@@ -1165,7 +1068,6 @@ class TagManagerTab(QWidget):
                         self.file_tag_list.addItem(item)
                         added_new_tags = True
                 
-                # 🔹 WAKE UP THE SAVE BUTTON IF AI FOUND NEW UNIQUE TAGS
                 if added_new_tags:
                     self.wake_up_save_button()
         except Exception as e:
@@ -1173,9 +1075,6 @@ class TagManagerTab(QWidget):
         finally:
             QApplication.restoreOverrideCursor()
 
-    # =========================================================
-    # ☁️ CLOUD PULL & PUSH
-    # =========================================================
     def sync_inbox_with_cloud(self):
         library_db, _ = self.get_db_paths()
         if not os.path.exists(library_db): return
@@ -1248,7 +1147,6 @@ class TagManagerTab(QWidget):
             self.pending_cloud_matches.clear()
             self.btn_approve_all_cloud.hide()
             
-            # 🔹 Reset the Save button style
             self.btn_save_archive.setText("Archive and Save File")
             self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
             
@@ -1298,16 +1196,12 @@ class TagManagerTab(QWidget):
             self.btn_save_archive.setText("Save Updates to Archive")
             self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
             
-    # =========================================================
-    # MAIN TRANSACTION ENGINE: THE GRADUATION PARSER
-    # =========================================================
     def graduate_file_to_archive(self):
         if not self.current_selected_file or not self.current_file_hash: return
 
         library_db, _ = self.get_db_paths()
         if not os.path.exists(library_db): return
 
-        # Strip the cloud icon off the tags before saving
         final_tags = []
         for i in range(self.file_tag_list.count()):
             raw_tag = self.file_tag_list.item(i).text().strip().lower()
@@ -1348,7 +1242,6 @@ class TagManagerTab(QWidget):
             else:
                 self.log("CLOUD SYNC: Skipped. (User opted-out or payload empty).")
             
-            # Clean up memory
             if self.current_file_hash in self.pending_cloud_matches:
                 del self.pending_cloud_matches[self.current_file_hash]
                 
@@ -1357,7 +1250,6 @@ class TagManagerTab(QWidget):
             self.current_selected_file = None
             self.current_file_hash = None
             
-            # 🔹 Reset dynamic buttons
             self.btn_save_archive.setText("Archive and Save File")
             self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
             self.btn_approve_all_cloud.hide()

@@ -1,4 +1,3 @@
-# Src/Logic/file_ops.py
 import os
 import shutil
 import subprocess
@@ -13,7 +12,7 @@ class FileContextMenu(QObject):
         super().__init__()
         self.app = app_instance  
         self.is_cut = False
-        self.internal_cut_path = None # Tracks the cut source for moving
+        self.internal_cut_path = None
 
     def show_menu(self, global_position, widget, selected_path, current_folder):
         menu = QMenu(widget)
@@ -37,7 +36,6 @@ class FileContextMenu(QObject):
             action_delete.setEnabled(False)
             action_open.setEnabled(False)
 
-        # Only enable paste if the OS clipboard contains actual files (URLs)
         clipboard = QApplication.clipboard()
         if not clipboard.mimeData().hasUrls() or current_folder == "VIRTUAL_BLOCK":
             action_paste.setEnabled(False)
@@ -60,7 +58,6 @@ class FileContextMenu(QObject):
 
     def on_copy(self, path):
         if not path: return
-        # Put the actual file URL into the OS clipboard
         clipboard = QApplication.clipboard()
         mime = QMimeData()
         mime.setUrls([QUrl.fromLocalFile(path)])
@@ -71,8 +68,8 @@ class FileContextMenu(QObject):
 
     def on_cut(self, path):
         if not path: return
-        self.on_copy(path) # Send to OS clipboard
-        self.is_cut = True # Flag internal system to MOVE instead of COPY on next paste
+        self.on_copy(path)
+        self.is_cut = True
         self.internal_cut_path = path
 
     def on_paste(self, target_folder):
@@ -92,31 +89,26 @@ class FileContextMenu(QObject):
                 if src_path == dest_path: continue
 
                 try:
-                    # If we flagged it as a cut operation earlier
                     if self.is_cut and self.internal_cut_path == src_path:
                         if hasattr(self.app, 'release_media_file'):
-                            # Force viewer to release the file first
                             self.app.release_media_file(path)
-                            # Force Qt to repaint and drop pixmap
                             QApplication.processEvents()
                             QApplication.processEvents()
 
                             time.sleep(0.1)
                             
-                        # 🔹 RETRY LOOP FOR MOVING
                         max_retries = 10
                         for i in range(max_retries):
                             try:
                                 shutil.move(src_path, dest_path)
-                                break # Success! Break out of the loop
+                                break
                             except PermissionError as e:
-                                if i == max_retries - 1: raise e # Fail if it stuck after 10 tries
-                                time.sleep(0.05) # Wait 50ms and try again
+                                if i == max_retries - 1: raise e
+                                time.sleep(0.05)
                                 
                         self.is_cut = False
                         self.internal_cut_path = None
                     else:
-                        # Standard copy
                         if os.path.isdir(src_path):
                             shutil.copytree(src_path, dest_path)
                         else:
@@ -124,7 +116,6 @@ class FileContextMenu(QObject):
                 except Exception as e:
                     QMessageBox.critical(None, "Paste Error", f"Failed to paste:\n{str(e)}")
 
-        # Refresh the gallery so the new file shows up instantly
         if hasattr(self.app, 'refresh_folder_ui'):
             self.app.refresh_folder_ui(target_folder)
 
@@ -139,27 +130,24 @@ class FileContextMenu(QObject):
         
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                # 1. Trigger the Lock Breaker
                 if hasattr(self.app, 'release_media_file'):
                     self.app.release_media_file(path)
                     QApplication.processEvents()
                     time.sleep(0.05)
 
-                # 2. Extended Retry Loop
-                max_retries = 20  # Try for up to 2 full seconds
+                max_retries = 20
                 for i in range(max_retries):
                     try:
                         if os.path.isdir(path):
                             shutil.rmtree(path)
                         else:
                             os.remove(path)
-                        break # Success! Break out of the loop
+                        break
                     except PermissionError as e:
                         if i == max_retries - 1: 
-                            raise e # Give up if it's still locked after 2 seconds
-                        time.sleep(0.1) # Wait 100ms and try again
+                            raise e
+                        time.sleep(0.1)
                 
-                # 3. Refresh UI
                 if hasattr(self.app, 'refresh_folder_ui'):
                     parent_dir = os.path.dirname(path)
                     self.app.refresh_folder_ui(parent_dir)

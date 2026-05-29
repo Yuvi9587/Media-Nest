@@ -12,9 +12,6 @@ from send2trash import send2trash
 from Src.Logic.deduplication import DeduplicationWorker
 from Src.Logic.video_dedup import VideoDedupTab
 from Src.Logic.tags import TagManagerTab
-# ==========================================
-# THUMBNAIL WORKER
-# ==========================================
 class ThumbnailWorker(QThread):
     thumb_ready = pyqtSignal(str, QImage, str, str) 
 
@@ -37,38 +34,30 @@ class ThumbnailWorker(QThread):
                 if not img.isNull():
                     self.thumb_ready.emit(path, img, res_text, size_mb)
 
-# ==========================================
-# 🔹 UPGRADED: FOCUSABLE IMAGE CLASS
-# ==========================================
 class FocusableClickableLabel(QLabel):
     clicked = pyqtSignal(str) 
-    focused = pyqtSignal(str, QWidget) # Emits its path and itself when focused via keyboard
+    focused = pyqtSignal(str, QWidget)
     
     def __init__(self, file_path, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.file_path = file_path
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus) # 👈 Allows Tab and Arrow Key focus!
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(self.file_path)
-            self.setFocus() # Focus the widget if clicked manually
+            self.setFocus()
 
     def focusInEvent(self, event):
         super().focusInEvent(event)
-        # Draw a beautiful blue highlight when selected via keyboard
         self.setStyleSheet("background-color: #1e1e1e; border: 2px solid #0e639c; border-radius: 6px;")
         self.focused.emit(self.file_path, self)
 
     def focusOutEvent(self, event):
         super().focusOutEvent(event)
-        # Restore standard border when focus is lost
         self.setStyleSheet("background-color: #1e1e1e; border: 1px solid #454545; border-radius: 6px;")
 
-# ==========================================
-# MAIN DIALOG
-# ==========================================
 class SettingsDialog(QDialog):
     def __init__(self, config_path, parent=None):
         super().__init__(parent)
@@ -77,7 +66,6 @@ class SettingsDialog(QDialog):
         self.setMinimumHeight(700)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowMaximizeButtonHint | Qt.WindowType.WindowMinimizeButtonHint)
         
-        # 🔹 DYNAMIC PORTABLE CONFIG FIX 🔹
         import sys
         if getattr(sys, 'frozen', False):
             base_dir = os.path.dirname(sys.executable)
@@ -99,14 +87,13 @@ class SettingsDialog(QDialog):
         self.auto_delete_mode = "safe" 
         
         self.thumb_labels_map = {} 
-        self.nav_groups = [] # 👈 2D Grid map for Arrow Key Navigation
+        self.nav_groups = []
 
         self.scale_map = {
             "50%": "0.5", "70%": "0.7", "90%": "0.9", "100% (Default)": "1.0",
             "125%": "1.25", "150%": "1.5", "175%": "1.75", "200%": "2.0"
         }
         self.reverse_scale_map = {v: k for k, v in self.scale_map.items()}
-        # --- Performance Map ---
         self.current_perf_mode = "balanced"
         self.perf_map = {
             "High Performance (Max Speed)": "high",
@@ -122,17 +109,14 @@ class SettingsDialog(QDialog):
         
         self.current_strictness = 0 
         
-        # 1. 🔹 Always grab the official database folder from the OS Registry first!
         settings = QSettings("MediaNest", "AppConfig")
         self.current_db_folder = settings.value("db_folder_path", "", type=str)
 
-        # 2. Load the rest of the visual settings from the JSON file
         if os.path.exists(self.config_path):
             try:
                 with open(self.config_path, "r") as f:
                     config = json.load(f)
                     
-                    # Fallback: Only use the JSON db_folder if QSettings was somehow empty
                     if not self.current_db_folder:
                         self.current_db_folder = config.get("db_folder", "")
                         
@@ -155,7 +139,6 @@ class SettingsDialog(QDialog):
         self.tab_interface = QWidget()
         self.tab_dedupe = QWidget() 
         
-        # 🔹 LAZY LOAD: Create empty placeholders instead of running heavy UI functions instantly
         self.tab_tag_manager = None
         self.tab_tag_placeholder = QWidget()
         
@@ -173,7 +156,6 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(self.tab_video_placeholder, "Video Dedup")
         self.tabs.addTab(self.tab_pagination_placeholder, "Pagination")
 
-        # --- DATABASE TAB ---
         db_layout = QVBoxLayout(self.tab_database)
         db_group = QGroupBox("Database Setup")
         db_inner_layout = QVBoxLayout()
@@ -189,13 +171,11 @@ class SettingsDialog(QDialog):
         db_layout.addWidget(db_group)
         db_layout.addStretch()
 
-        # --- INTERFACE TAB ---
         ui_layout = QVBoxLayout(self.tab_interface)
         ui_group = QGroupBox("Visual & Performance Settings")
         ui_inner_layout = QVBoxLayout()
-        ui_inner_layout.setSpacing(15) # Add nice spacing between rows
+        ui_inner_layout.setSpacing(15)
         
-        # 1. Scale Row
         scale_row = QHBoxLayout()
         scale_row.addWidget(QLabel("Window UI Scale (Requires Restart):"))
         self.combo_scale = QComboBox()
@@ -220,7 +200,6 @@ class SettingsDialog(QDialog):
         scale_row.addStretch() 
         ui_inner_layout.addLayout(scale_row)
         
-        # 2. NEW: Performance Row
         perf_row = QHBoxLayout()
         perf_row.addWidget(QLabel("Performance Mode:"))
         self.combo_perf = QComboBox()
@@ -235,7 +214,6 @@ class SettingsDialog(QDialog):
         ui_layout.addWidget(ui_group)
         ui_layout.addStretch()
 
-        # --- DEDUPLICATION DASHBOARD ---
         dedupe_layout = QVBoxLayout(self.tab_dedupe)
         dedupe_layout.setContentsMargins(10, 15, 10, 10)
         dedupe_layout.setSpacing(15)
@@ -298,7 +276,6 @@ class SettingsDialog(QDialog):
         self.pb_dedupe.setVisible(False)
         dedupe_layout.addWidget(self.pb_dedupe)
 
-        # --- SPLIT VIEW ---
         content_split_layout = QHBoxLayout()
 
         self.dedupe_scroll = QScrollArea()
@@ -316,7 +293,6 @@ class SettingsDialog(QDialog):
         self.dedupe_scroll.verticalScrollBar().valueChanged.connect(self.on_dedupe_scroll)
         content_split_layout.addWidget(self.dedupe_scroll, stretch=6) 
 
-        # --- THE SCROLLABLE STACKED PREVIEW PANEL ---
         self.preview_panel = QFrame()
         self.preview_panel.setObjectName("PreviewPanel")
         self.preview_panel.setStyleSheet("#PreviewPanel { background-color: #252526; border-radius: 8px; border: 1px solid #3e3e42; }")
@@ -327,12 +303,10 @@ class SettingsDialog(QDialog):
         lbl_preview_title.setStyleSheet("font-weight: bold; font-size: 15px; color: #ffffff;")
         preview_layout.addWidget(lbl_preview_title)
 
-        # 1. Create a scroll area so we can handle 3+ images
         self.preview_scroll = QScrollArea()
         self.preview_scroll.setWidgetResizable(True)
         self.preview_scroll.setFrameShape(QFrame.Shape.NoFrame)
         
-        # Hide the scrollbar background to make it look clean
         self.preview_scroll.setStyleSheet("""
             QScrollArea { background-color: transparent; border: none; }
             QScrollBar:vertical { background: #1e1e1e; width: 12px; }
@@ -340,14 +314,12 @@ class SettingsDialog(QDialog):
             QScrollBar::handle:vertical:hover { background: #4f4f4f; }
         """)
 
-        # 2. Container for the dynamic images
         self.preview_container = QWidget()
         self.preview_container.setStyleSheet("background-color: transparent;")
         
-        # We use a Vertical Layout (QVBoxLayout) to stack them top-to-bottom
         self.preview_container_layout = QVBoxLayout(self.preview_container)
         self.preview_container_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
-        self.preview_container_layout.setSpacing(25) # Add nice padding between each image
+        self.preview_container_layout.setSpacing(25)
 
         self.lbl_preview_placeholder = QLabel("Click an image to compare the group")
         self.lbl_preview_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -361,7 +333,6 @@ class SettingsDialog(QDialog):
         dedupe_layout.addLayout(content_split_layout)
         main_layout.addWidget(self.tabs)
 
-        # --- BOTTOM ACTION BUTTONS ---
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         self.btn_cancel = QPushButton("Cancel")
@@ -430,10 +401,8 @@ class SettingsDialog(QDialog):
         else:
             self._last_scale_text = text
 
-    # 🔹 KEYBOARD NAVIGATION INTERCEPTOR
     def keyPressEvent(self, event):
         """Intercepts Arrow Keys to navigate the duplicate grid instantly without lag."""
-        # Only hijack arrow keys if we are on the Deduplication tab and have a widget focused
         if self.tabs.currentIndex() != 2 or not self.nav_groups:
             super().keyPressEvent(event)
             return
@@ -445,7 +414,6 @@ class SettingsDialog(QDialog):
 
         if event.key() in (Qt.Key.Key_Right, Qt.Key.Key_Left, Qt.Key.Key_Up, Qt.Key.Key_Down):
             
-            # 1. Fast Lookup: Find exactly where we currently are without building a new grid
             current_g, current_i = -1, -1
             for g_idx, group in enumerate(self.nav_groups):
                 if focus_widget in group:
@@ -457,7 +425,6 @@ class SettingsDialog(QDialog):
                 super().keyPressEvent(event)
                 return
 
-            # Helper function: Instantly try to focus the target. Safely ignores deleted images.
             def try_focus(g, i):
                 try:
                     if 0 <= g < len(self.nav_groups) and 0 <= i < len(self.nav_groups[g]):
@@ -466,23 +433,21 @@ class SettingsDialog(QDialog):
                             w.setFocus()
                             return True
                 except RuntimeError:
-                    pass # Object was moved to Recycle Bin and deleted from C++ memory
+                    pass
                 return False
 
-            # 2. Process Movement (0(1) complexity = Zero Lag!)
             if event.key() == Qt.Key.Key_Right:
                 if not try_focus(current_g, current_i + 1):
-                    try_focus(current_g + 1, 0) # Wrap to next group
+                    try_focus(current_g + 1, 0)
                 event.accept()
                 
             elif event.key() == Qt.Key.Key_Left:
                 if not try_focus(current_g, current_i - 1):
                     if current_g > 0:
-                        try_focus(current_g - 1, len(self.nav_groups[current_g - 1]) - 1) # Wrap to previous
+                        try_focus(current_g - 1, len(self.nav_groups[current_g - 1]) - 1)
                 event.accept()
                 
             elif event.key() == Qt.Key.Key_Down:
-                # Jump down to the next valid group
                 for next_g in range(current_g + 1, len(self.nav_groups)):
                     target_i = min(current_i, len(self.nav_groups[next_g]) - 1)
                     if try_focus(next_g, target_i):
@@ -490,14 +455,12 @@ class SettingsDialog(QDialog):
                 event.accept()
                 
             elif event.key() == Qt.Key.Key_Up:
-                # Jump up to the previous valid group
                 for prev_g in range(current_g - 1, -1, -1):
                     target_i = min(current_i, len(self.nav_groups[prev_g]) - 1)
                     if try_focus(prev_g, target_i):
                         break
                 event.accept()
         else:
-            # Let default keys (like Tab/Shift+Tab) behave normally
             super().keyPressEvent(event)
 
     def on_dedupe_scroll(self, scroll_value):
@@ -509,25 +472,19 @@ class SettingsDialog(QDialog):
             widget = self.dedupe_content_layout.itemAt(idx).widget()
             
             if widget and widget.isVisible():
-                # If the bottom 60% of the group card is still visible in the viewport
                 if widget.y() + (widget.height() * 0.4) > scroll_value:
                     
                     group_idx = widget.property("group_index")
                     first_img = widget.property("first_image")
                     
-                    # Only update if we scrolled into a NEW group
                     if first_img and getattr(self, 'active_preview_group', -1) != group_idx:
                         self.active_preview_group = group_idx
                         self.show_preview(first_img)
                     break
 
-    # ==========================================
-    # PREVIEW ENGINE
-    # ==========================================
     def on_thumbnail_focused(self, file_path, widget):
         """Triggered automatically when the keyboard focus lands on an image."""
         self.show_preview(file_path)
-        # Ensure the scrollbar smoothly chases the active widget!
         self.dedupe_scroll.ensureWidgetVisible(widget, 50, 100)
 
     def show_preview(self, file_path):
@@ -536,7 +493,6 @@ class SettingsDialog(QDialog):
             
         self.current_preview_path = file_path
         
-        # 1. Find the duplicate group this image belongs to
         target_group = None
         for group_data in self.current_duplicate_groups:
             items = group_data[0]
@@ -545,30 +501,21 @@ class SettingsDialog(QDialog):
                 break
         
         if not target_group:
-            target_group = [{'path': file_path}] # Fallback if not found
+            target_group = [{'path': file_path}]
             
-        # 2. Clear existing preview container
         for i in reversed(range(self.preview_container_layout.count())):
             w = self.preview_container_layout.itemAt(i).widget()
             if w: w.setParent(None)
 
-        # ==========================================
-        # 🔹 DYNAMIC 2-FIT SCALING ENGINE
-        # ==========================================
-        # Get the exact pixel height available on the user's monitor right now
         viewport_height = self.preview_scroll.viewport().height()
         viewport_width = self.preview_scroll.viewport().width()
         
-        # Divide the height by 2, and subtract 65 pixels to leave room for the text labels and borders.
-        # This mathematically guarantees the first 2 images will fit without triggering a scrollbar!
         target_h = int((viewport_height / 2) - 65)
         target_w = int(viewport_width - 40)
         
-        # Fallback minimums just in case the window gets resized extremely small
         target_h = max(target_h, 150)
         target_w = max(target_w, 150)
             
-        # 3. Build dynamically stacked previews
         for index, item in enumerate(target_group):
             path = item['path']
             if not os.path.exists(path): continue
@@ -583,7 +530,6 @@ class SettingsDialog(QDialog):
             reader = QImageReader(path)
             orig_size = reader.size()
             if orig_size.isValid():
-                # Force the image to scale down to our mathematically perfect target size!
                 reader.setScaledSize(orig_size.scaled(target_w, target_h, Qt.AspectRatioMode.KeepAspectRatio))
                 img = reader.read()
                 if not img.isNull():
@@ -598,7 +544,6 @@ class SettingsDialog(QDialog):
             size_mb = os.path.getsize(path) / (1024 * 1024)
             filename = os.path.basename(path)
             
-            # Highlight the specific image you clicked on!
             is_selected = (path == file_path)
             text_color = "#00a2ff" if is_selected else "#ffffff"
             border_color = "#00a2ff" if is_selected else "#454545"
@@ -619,39 +564,32 @@ class SettingsDialog(QDialog):
     def on_tab_changed(self, index):
         tab_name = self.tabs.tabText(index)
         
-        # 1. Check if the user clicked an advanced tab
         if tab_name in ["Tag Manager", "Image Dedup", "Video Dedup"]:
             from PyQt6.QtCore import QSettings
             settings = QSettings("MediaNest", "AppConfig")
             
-            # 2. If they haven't set up a database, show the popup!
             if not settings.value("db_folder_path"):
                 from Src.Dialogs.setup_dialog import FirstTimeSetupDialog
                 setup_window = FirstTimeSetupDialog(self)
                 
                 if setup_window.exec() == QDialog.DialogCode.Accepted:
-                    # They finished setup! Reload the config to get the new path
                     self.load_config()
                     self.db_path_input.setText(self.current_db_folder)
                 else:
-                    # They cancelled the setup. Kick them back to the Interface tab!
                     self.tabs.setCurrentIndex(1) 
                     return
 
-        # 3. 🔹 LAZY LOADING LOGIC 🔹
         if tab_name == "Tag Manager":
-            # If it hasn't been built yet, build it now!
             if self.tab_tag_manager is None:
                 self.tabs.setTabIcon(index, QIcon(os.path.join(self.asset_base_dir, "assets", "uisvg", "loading.svg")))
                 self.tabs.setTabText(index, "Loading...")
-                QApplication.processEvents() # Force UI to show loading text
+                QApplication.processEvents()
                 
                 self.tab_tag_manager = TagManagerTab(self)
                 self.tabs.removeTab(index)
                 self.tabs.insertTab(index, self.tab_tag_manager, "Tag Manager")
                 self.tabs.setCurrentIndex(index)
             
-            # 🔹 ANTI-FREEZE: Delay the database refresh by 20ms so the UI switches tabs instantly!
             QTimer.singleShot(20, self.tab_tag_manager.refresh_global_tags)
             QTimer.singleShot(20, self.tab_tag_manager.refresh_tagless_inbox)
 
@@ -681,21 +619,16 @@ class SettingsDialog(QDialog):
     def clear_preview(self):
         self.current_preview_path = ""
         
-        # Delete all dynamic images in the layout
         for i in reversed(range(self.preview_container_layout.count())):
             w = self.preview_container_layout.itemAt(i).widget()
             if w: w.setParent(None)
             
-        # Put the placeholder text back
         self.lbl_preview_placeholder = QLabel("Click an image to compare the group")
         self.lbl_preview_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_preview_placeholder.setStyleSheet("color: #666666; font-size: 14px;")
         self.preview_container_layout.addWidget(self.lbl_preview_placeholder)
 
 
-    # ==========================================
-    # DEDUPLICATION WORKER LOGIC
-    # ==========================================
     def start_dedupe_scan(self, is_auto_rescan=False):
         if not is_auto_rescan: self.auto_delete_mode = "safe"
 
@@ -718,7 +651,7 @@ class SettingsDialog(QDialog):
         self.dedupe_search_bar.setEnabled(False)
         self.clear_preview() 
         self.thumb_labels_map.clear()
-        self.nav_groups.clear() # 👈 Reset the navigation map
+        self.nav_groups.clear()
         
         self.render_queue = []
         for i in reversed(range(self.dedupe_content_layout.count())):
@@ -788,12 +721,10 @@ class SettingsDialog(QDialog):
             self.lbl_dedupe_status.setText(f"Done! Displaying {self.total_render_items} duplicate groups.")
             self.pb_dedupe.setVisible(False)
             
-            # --- Auto-load the first visible group! ---
             self.on_dedupe_scroll(self.dedupe_scroll.verticalScrollBar().value())
             return
 
         i, group_data = self.render_queue.pop(0)
-        # ... (keep the rest of the method exactly the same)
         group_items, group_tags, avg_conf = group_data 
 
         rendered_count = self.total_render_items - len(self.render_queue)
@@ -821,7 +752,6 @@ class SettingsDialog(QDialog):
         btn_ignore.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_ignore.setStyleSheet("QPushButton { background-color: transparent; border: 1px solid #3fb950; color: #3fb950; padding: 4px 10px; border-radius: 4px; font-weight: bold; } QPushButton:hover { background-color: rgba(63, 185, 80, 0.1); }")
         
-        # --- Delete All Button ---
         btn_delete_all = QPushButton("Delete All")
         btn_delete_all.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_delete_all.setStyleSheet("QPushButton { background-color: transparent; border: 1px solid #a31515; color: #a31515; padding: 4px 10px; border-radius: 4px; font-weight: bold; } QPushButton:hover { background-color: rgba(163, 21, 21, 0.1); }")
@@ -829,7 +759,7 @@ class SettingsDialog(QDialog):
         header_layout.addWidget(lbl_title)
         header_layout.addWidget(lbl_conf)
         header_layout.addStretch()
-        header_layout.addWidget(btn_delete_all) # Add the new button here
+        header_layout.addWidget(btn_delete_all)
         header_layout.addWidget(btn_ignore)
         card_main_layout.addLayout(header_layout)
         
@@ -843,7 +773,6 @@ class SettingsDialog(QDialog):
         has_checkboxes = len(group_items) >= 3
         checkbox_refs = [] 
         
-        # 🔹Array to collect the images for this specific row
         nav_group_row = [] 
         
         for item in group_items:
@@ -857,11 +786,9 @@ class SettingsDialog(QDialog):
             
             thumb_layout = QVBoxLayout()
             
-            # --- USING THE NEW FOCUSABLE CLASS ---
             lbl_thumb = FocusableClickableLabel(file_path)
             lbl_thumb.clicked.connect(self.show_preview) 
-            lbl_thumb.focused.connect(self.on_thumbnail_focused) # Trigger preview when tabbed to!
-            # -------------------------------------
+            lbl_thumb.focused.connect(self.on_thumbnail_focused)
             
             lbl_thumb.setFixedSize(150, 150) 
             lbl_thumb.setStyleSheet("background-color: #1e1e1e; border: 1px solid #454545; border-radius: 6px;")
@@ -898,7 +825,6 @@ class SettingsDialog(QDialog):
             item_layout.addWidget(btn_del)
             group_images_layout.addWidget(item_widget)
 
-        # 🔹Add this group's images to the global navigation map
         if nav_group_row:
             self.nav_groups.append(nav_group_row)
 
@@ -908,14 +834,8 @@ class SettingsDialog(QDialog):
         self.dedupe_content_layout.addWidget(group_card)
         QTimer.singleShot(5, self.render_next_batch)
 
-    # ==========================================
-    # EXCEPTION MANAGER
-    # ==========================================
-    # ==========================================
-    # EXCEPTION MANAGER
-    # ==========================================
     def mark_not_duplicates(self, group_card, group_data, checkboxes):
-        group_items = group_data[0] # Unpack the items for the database logic
+        group_items = group_data[0]
         
         db_file = os.path.join(self.current_db_folder, "library.db")
         conn = sqlite3.connect(db_file)
@@ -950,10 +870,8 @@ class SettingsDialog(QDialog):
         conn.commit()
         conn.close()
         
-        # --- 🔹 Purge the group from active memory! ---
         if group_data in self.current_duplicate_groups:
             self.current_duplicate_groups.remove(group_data)
-        # ---------------------------------------------------
         
         group_card.setParent(None)
         group_card.deleteLater()
@@ -969,9 +887,6 @@ class SettingsDialog(QDialog):
                 else:
                     widget.hide()
 
-    # ==========================================
-    # TWO-PHASE AUTO DELETE ENGINE
-    # ==========================================
     def auto_delete_low_res(self):
         if not self.current_duplicate_groups: return
 
@@ -1141,15 +1056,12 @@ class SettingsDialog(QDialog):
             conn.commit()
             conn.close()
             
-            # Check if one of the deleted images is currently loaded in the preview panel
             if self.current_preview_path in paths_to_delete:
                 self.clear_preview()
                 
-            # Remove from background memory
             if group_data in self.current_duplicate_groups:
                 self.current_duplicate_groups.remove(group_data)
                 
-            # Remove the entire group card from the UI
             group_card.setParent(None)
             group_card.deleteLater()
 
@@ -1169,7 +1081,6 @@ class SettingsDialog(QDialog):
         new_strictness = self.slider_strictness.value() 
         config_changed = False
         
-        # Update the Global Windows Registry
         settings = QSettings("MediaNest", "AppConfig")
         if new_folder:
             settings.setValue("db_folder_path", new_folder)
@@ -1178,13 +1089,12 @@ class SettingsDialog(QDialog):
 
         try:
             config = {}
-            # 🔹 BUG FIX: Safely handle empty or corrupted config files
             if os.path.exists(self.config_path):
                 try:
                     with open(self.config_path, "r") as f: 
                         config = json.load(f)
                 except json.JSONDecodeError:
-                    config = {} # If the file is blank or broken, just start fresh!
+                    config = {}
             
             if new_folder != self.current_db_folder:
                 config["db_folder"] = new_folder
@@ -1196,14 +1106,12 @@ class SettingsDialog(QDialog):
                 self.ui_scale_changed = True
                 config_changed = True
                 
-                # Warn the user to restart!
                 QMessageBox.information(
                     self, 
                     "Restart Required", 
                     "You have changed the UI Scale.\n\nPlease restart Media Nest for the new scaling to take effect!"
                 )
                 
-            # --- Save Performance Mode ---
             new_perf_val = self.perf_map[self.combo_perf.currentText()]
             if new_perf_val != self.current_perf_mode:
                 config["performance_mode"] = new_perf_val
@@ -1223,7 +1131,6 @@ class SettingsDialog(QDialog):
                     json.dump(config, f, indent=4)
                     
         except Exception as e:
-            # 🔹 BUG FIX: If it fails, actually show an error popup instead of freezing!
             error_msg = f"Failed to save settings to:\n{self.config_path}\n\nError: {e}"
             QMessageBox.critical(self, "Save Error", error_msg)
             print(traceback.format_exc())
@@ -1236,23 +1143,19 @@ class SettingsDialog(QDialog):
         from PyQt6.QtMultimedia import QMediaPlayer
         from PyQt6.QtCore import QUrl
         
-        # Find every single QMediaPlayer inside this dialog (including the one in the Dedup Tab)
         players = self.findChildren(QMediaPlayer)
         for player in players:
             player.stop()
-            player.setSource(QUrl()) # completely releases the file lock!
+            player.setSource(QUrl())
 
-    # Override the 'X' button close event
     def closeEvent(self, event):
         self.stop_all_media()
         super().closeEvent(event)
 
-    # Override the 'Cancel' or 'Escape' key event
     def reject(self):
         self.stop_all_media()
         super().reject()
 
-    # Override the 'Save' or 'OK' button event
     def accept(self):
         self.stop_all_media()
         super().accept()

@@ -7,11 +7,9 @@ from PyQt6.QtGui import QMouseEvent, QPixmap, QIcon
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 from PyQt6.QtCore import pyqtSignal
 
-# Import our custom Gallery
 from Src.Ui.gallery import GallerySection
 from Src.Ui.reader_widget import ManhwaReaderWidget, MangaReaderWidget
 from Src.Logic.paths import resource_path
-# --- CUSTOM SLIDER ---
 class JumpSlider(QSlider):
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -46,7 +44,6 @@ class DynamicImageLabel(QLabel):
     def __init__(self):
         super().__init__()
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # 🔹 This is the magic line that lets it shrink and expand freely when splitters are dragged
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self._raw_pixmap = None
         self.is_zoomed = False
@@ -108,7 +105,6 @@ class DynamicImageLabel(QLabel):
         if avail_w <= 0 or avail_h <= 0:
             return
 
-        # 1. Handle Static Images
         if self._raw_pixmap and not self._raw_pixmap.isNull():
             scaled = self._raw_pixmap.scaled(
                 avail_w, avail_h, 
@@ -117,7 +113,6 @@ class DynamicImageLabel(QLabel):
             )
             super().setPixmap(scaled) 
             
-        # 2. Handle Animated GIFs
         elif self.movie() and self.movie().isValid():
             orig_size = self.movie().currentImage().size()
             if not orig_size.isEmpty():
@@ -143,21 +138,18 @@ class DynamicImageLabel(QLabel):
             return
 
         if not self.is_zoomed:
-            # We are zooming IN.
             drawn_pixmap = self.pixmap()
             if not drawn_pixmap: return
             
             drawn_w = drawn_pixmap.width()
             drawn_h = drawn_pixmap.height()
             
-            # Find top-left of the drawn image
             offset_x = (self.width() - drawn_w) / 2.0
             offset_y = (self.height() - drawn_h) / 2.0
             
             click_x = event.position().x()
             click_y = event.position().y()
             
-            # Prevent zooming if clicked on the black borders
             if click_x < offset_x or click_x > offset_x + drawn_w or click_y < offset_y or click_y > offset_y + drawn_h:
                 return 
                 
@@ -201,7 +193,6 @@ class DynamicImageLabel(QLabel):
             self.update_cursor()
             
         else:
-            # We are zooming OUT.
             self.reset_zoom()
 
     def reset_zoom(self):
@@ -408,17 +399,14 @@ class ZoomOverlay(QWidget):
 class VideoContainer(QWidget):
     def __init__(self, main_window):
         super().__init__()
-        # Use a vertical layout with ZERO spacing so the video and controls touch perfectly
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)
         
-        # Top: The video player
         self.video_widget = CustomVideoWidget(self)
         self.video_widget.setAspectRatioMode(Qt.AspectRatioMode.KeepAspectRatio)
         self.video_widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         
-        # Bottom: The Windows Media Player style control bar
         self.video_controls = QWidget(self)
         self.video_controls.setFixedHeight(95)
         self.video_controls.setStyleSheet("background-color: #111111;") 
@@ -427,7 +415,6 @@ class VideoContainer(QWidget):
         self.controls_layout.setContentsMargins(15, 10, 15, 10)
         self.controls_layout.setSpacing(5)
         
-        # --- ROW 1: THE TIMELINE ---
         self.timeline_layout = QHBoxLayout()
         
         self.lbl_current_time = QLabel("00:00")
@@ -448,16 +435,13 @@ class VideoContainer(QWidget):
         self.timeline_layout.addWidget(self.slider_progress)
         self.timeline_layout.addWidget(self.lbl_total_time)
         
-        # --- ROW 2: BUTTONS ---
         self.buttons_layout = QHBoxLayout()
         
-        # Helper function to easily load icons from your assets folder
         self.asset_dir = main_window.ui.asset_dir
        
         def get_icon(name):
             return QIcon(os.path.join(self.asset_dir, "Svg", f"{name}.svg"))
 
-        # --- Left Side Controls (Volume) ---
         self.left_controls_layout = QHBoxLayout()
         self.left_controls_layout.setSpacing(10)
         
@@ -482,11 +466,9 @@ class VideoContainer(QWidget):
         self.left_controls_layout.addWidget(self.btn_volume)
         self.left_controls_layout.addWidget(self.slider_volume)
         
-        # --- Center Controls (Previous, Skip Back, Play, Skip Forward, Next) ---
         self.center_controls_layout = QHBoxLayout()
         self.center_controls_layout.setSpacing(15) 
         
-        # Shared style for the transparent SVG buttons
         icon_button_style = "QPushButton { background-color: transparent; border: none; padding: 0px; margin: 0px; }"
         
         self.btn_previous = QPushButton()
@@ -525,14 +507,12 @@ class VideoContainer(QWidget):
         self.btn_next.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_next.setStyleSheet(icon_button_style)
         
-        # Add them in the correct order!
         self.center_controls_layout.addWidget(self.btn_previous)
         self.center_controls_layout.addWidget(self.btn_skip_backward)
         self.center_controls_layout.addWidget(self.btn_play)
         self.center_controls_layout.addWidget(self.btn_skip_forward)
         self.center_controls_layout.addWidget(self.btn_next)
         
-        # --- Right Side Controls (Loop & Fullscreen) ---
         self.right_controls_container = QWidget()
         self.right_controls_container.setFixedWidth(250)
         
@@ -557,7 +537,6 @@ class VideoContainer(QWidget):
         self.right_controls_layout.addWidget(self.btn_loop)
         self.right_controls_layout.addWidget(self.btn_fullscreen)        
         
-        # Assemble Row 2
         self.buttons_layout.addLayout(self.left_controls_layout)
         self.buttons_layout.addStretch()
         self.buttons_layout.addLayout(self.center_controls_layout) 
@@ -598,7 +577,6 @@ class MainWindowUI:
         self.sidebar_layout = QVBoxLayout(self.sidebar_widget)
         self.sidebar_layout.setContentsMargins(0, 0, 0, 0)
 
-        # ================= HEADER =================
         self.header_frame = QFrame()
         self.header_frame.setFixedHeight(80) 
         
@@ -609,7 +587,6 @@ class MainWindowUI:
 
         self.header_layout.addStretch()
 
-        # --- Logo ---
         self.logo_container = QWidget()
         self.logo_container.setFixedHeight(80) 
         self.logo_container.setStyleSheet("background-color: transparent;") 
@@ -635,7 +612,6 @@ class MainWindowUI:
             self.header_layout.addWidget(self.logo_container)
             self.header_layout.addSpacing(15)
 
-        # --- Open Folder Button ---
         self.btn_open = QPushButton("OPEN FOLDER")
         self.btn_open.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_open.setFixedHeight(45)
@@ -670,7 +646,6 @@ class MainWindowUI:
             QPushButton:hover { background-color: #2ea043; }
         """)
 
-        # --- Change DB Folder Button ---
         self.btn_change_db = QPushButton()
         self.btn_change_db.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "settings.svg"))))
         self.btn_change_db.setIconSize(QSize(24, 24))
@@ -690,7 +665,6 @@ class MainWindowUI:
             QPushButton:hover { background-color: #505050; }
         """)
 
-        # --- Detach Viewer Button ---
         self.btn_detach = QPushButton("⧉") 
         self.btn_detach.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_detach.setFixedSize(45, 45)
@@ -713,7 +687,6 @@ class MainWindowUI:
 
         self.sidebar_layout.addWidget(self.header_frame)
 
-        # ================= SEARCH BAR =================
         search_container = QWidget()
         search_layout = QHBoxLayout(search_container)
         search_layout.setContentsMargins(10, 5, 10, 10)
@@ -722,7 +695,6 @@ class MainWindowUI:
         
         asset_dir = resource_path("assets")
 
-        # --- Search Icon ---
         self.search_icon_label = QLabel()
         search_pixmap = QPixmap(os.path.join(asset_dir, "Svg", "search.svg"))
 
@@ -737,7 +709,6 @@ class MainWindowUI:
         self.search_icon_label.setFixedWidth(24)
         self.search_icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # --- Search LineEdit ---
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Search files, folders, or .ext...")
 
@@ -761,7 +732,6 @@ class MainWindowUI:
 
         self.sidebar_layout.addWidget(search_container)
 
-        # ================= TREE VIEW =================
         self.tree_view = QTreeView()
         self.tree_view.setHeaderHidden(True)
         self.tree_view.setAnimated(True)
@@ -784,45 +754,35 @@ class MainWindowUI:
         self.lbl_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_placeholder.setStyleSheet("color: #6e6e6e; font-size: 16px;")
         
-        # ==========================================
-        # 🔹 MANHWA VIEWER LAYOUT
-        # ==========================================
         self.image_view_container = QWidget()
         self.image_view_layout = QHBoxLayout(self.image_view_container)
         self.image_view_layout.setContentsMargins(0, 0, 0, 0)
         self.image_view_layout.setSpacing(2)
 
-        # 1. The Scroll Area (Image Viewer)
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         
-        # We use a container widget so we can swap between the Standard viewer and the Manhwa viewer
         self.viewer_stack_widget = QWidget()
         self.viewer_stack_layout = QVBoxLayout(self.viewer_stack_widget)
         self.viewer_stack_layout.setContentsMargins(0,0,0,0)
 
-        # Standard Viewer (For GIFs and single images)
-        self.lbl_image = DynamicImageLabel() # 👈 Use our new smart label!
+        self.lbl_image = DynamicImageLabel()
         self.viewer_stack_layout.addWidget(self.lbl_image)
 
-        # High-Performance Virtual Reader (For folders)
         self.manhwa_reader = ManhwaReaderWidget(self.scroll_area)
         self.viewer_stack_layout.addWidget(self.manhwa_reader)
-        self.manhwa_reader.hide() # Hidden by default
+        self.manhwa_reader.hide()
         
-        # Classic Manga Reader
         self.manga_reader = MangaReaderWidget()
         self.viewer_stack_layout.addWidget(self.manga_reader)
-        self.manga_reader.hide() # Hidden by default
+        self.manga_reader.hide()
 
         self.scroll_area.setWidget(self.viewer_stack_widget)
 
-        # Connect the scrollbar to the virtual reader so it knows when to load images!
         self.scroll_area.verticalScrollBar().valueChanged.connect(self.manhwa_reader.scroll_update)
 
-        # 2. The Zoom Slider (Hidden until Manhwa loaded)
         self.manhwa_zoom_slider = QSlider(Qt.Orientation.Vertical)
         self.manhwa_zoom_slider.setRange(50, 200) 
         self.manhwa_zoom_slider.setValue(100)     
@@ -835,7 +795,6 @@ class MainWindowUI:
         """)
         self.manhwa_zoom_slider.hide()
 
-        # 3. The Custom External Scrollbar
         self.main_scrollbar = QScrollBar(Qt.Orientation.Vertical)
         self.main_scrollbar.setCursor(Qt.CursorShape.PointingHandCursor)
         self.main_scrollbar.setStyleSheet("""
@@ -846,13 +805,11 @@ class MainWindowUI:
             QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
         """)
 
-        # Sync the hidden native scrollbar with our custom one
         real_sb = self.scroll_area.verticalScrollBar()
         real_sb.rangeChanged.connect(self.main_scrollbar.setRange)
         real_sb.valueChanged.connect(self.main_scrollbar.setValue)
         self.main_scrollbar.valueChanged.connect(real_sb.setValue)
         
-        # Hide the custom scrollbar when it's not needed (just like native behavior)
         def sync_scroll_state(min_val, max_val):
             self.main_scrollbar.setPageStep(real_sb.pageStep())
             self.main_scrollbar.setSingleStep(real_sb.singleStep())
@@ -863,10 +820,9 @@ class MainWindowUI:
                 
         real_sb.rangeChanged.connect(sync_scroll_state)
 
-        # 🔹 ADD WIDGETS IN THE EXACT ORDER REQUESTED:
-        self.image_view_layout.addWidget(self.scroll_area)        # Left: Image
-        self.image_view_layout.addWidget(self.manhwa_zoom_slider) # Middle: Zoom Slider
-        self.image_view_layout.addWidget(self.main_scrollbar)     # Right: Custom Scrollbar
+        self.image_view_layout.addWidget(self.scroll_area)
+        self.image_view_layout.addWidget(self.manhwa_zoom_slider)
+        self.image_view_layout.addWidget(self.main_scrollbar)
 
         self.zoom_overlay = ZoomOverlay(self.image_view_container)
         self.zoom_overlay.hide()
@@ -883,9 +839,6 @@ class MainWindowUI:
 
         self.image_view_container.hide() 
 
-        # ==========================================
-        # VIDEO CONTAINER SETUP
-        # ==========================================
         self.video_container = VideoContainer(main_window)
         
         self.video_widget = self.video_container.video_widget

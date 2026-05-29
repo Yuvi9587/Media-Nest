@@ -1,4 +1,3 @@
-# Src/Ui/reader_widget.py
 import os
 import bisect
 import re
@@ -18,24 +17,18 @@ class ImageLoader(QRunnable):
     def __init__(self, path, target_width, signals):
         super().__init__()
         self.path = path
-        # We no longer aggressively shrink the image to the target_width
         self.target_width = target_width 
         self.signals = signals
 
     def run(self):
-        # Read the raw, original high-res image
         reader = QImageReader(self.path)
         image = reader.read()
         
         if image.isNull():
             return
 
-        # Keep it at 100% original quality in RAM!
         pixmap = QPixmap.fromImage(image)
         
-        # 🔹 ANTI-CRASH FIX 🔹
-        # Safely attempt to send the image to the UI. 
-        # If the user closed the reader while we were loading, just ignore it!
         try:
             self.signals.loaded.emit(self.path, pixmap, pixmap.size())
         except RuntimeError:
@@ -62,7 +55,6 @@ class ManhwaReaderWidget(QWidget):
         self.signals = LoaderSignals()
         self.signals.loaded.connect(self.on_image_loaded)
         
-        # --- ZOOM VARIABLES ---
         self.zoom_factor = 1.0
         self.viewport_width = 1000
         self.current_target_width = 1000
@@ -71,14 +63,11 @@ class ManhwaReaderWidget(QWidget):
     def set_zoom(self, percentage):
         self.zoom_factor = percentage / 100.0
         
-        # Calculate new width based on visible screen space
         visible_width = self.scroll_area.viewport().width()
         self.current_target_width = int(visible_width * self.zoom_factor)
         
-        # Force widget to grow horizontally if zoomed in > 100%
         self.setMinimumWidth(max(visible_width, self.current_target_width))
         
-        # Reset heights to smooth out the transition
         self.page_heights = [self.estimated_height for _ in self.paths]
         self.recalculate_offsets()
         
@@ -107,7 +96,6 @@ class ManhwaReaderWidget(QWidget):
         self.update()
         self.load_visible_images()
 
-        # Jump to specific image if clicked from the gallery!
         if jump_to_path and jump_to_path in self.paths:
             idx = self.paths.index(jump_to_path)
             target_y = self.page_offsets[idx]
@@ -131,8 +119,6 @@ class ManhwaReaderWidget(QWidget):
         while len(self.cache) > self.MAX_CACHE_IMAGES:
             self.cache.popitem(last=False)
             
-        # 🔹 ASPECT RATIO FIX 🔹
-        # Calculate the exact ratio between the original width and your screen's target width
         orig_w = size.width()
         orig_h = size.height()
         
@@ -142,7 +128,6 @@ class ManhwaReaderWidget(QWidget):
         else:
             scaled_height = orig_h
             
-        # Apply the scaled height instead of the raw original height
         old_height = self.page_heights[index]
         if old_height != scaled_height:
             self.page_heights[index] = scaled_height
@@ -170,7 +155,6 @@ class ManhwaReaderWidget(QWidget):
             if path in self.cache or path in self.loading: continue
             
             self.loading.add(path)
-            # Use current_target_width instead of viewport_width
             worker = ImageLoader(path, self.current_target_width, self.signals)
             self.thread_pool.start(worker)
 
@@ -181,7 +165,6 @@ class ManhwaReaderWidget(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         
-        # 🔹 Turn on High-Quality Anti-Aliasing for rendering!
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         
         painter.fillRect(self.rect(), self.BACKGROUND)
@@ -198,7 +181,6 @@ class ManhwaReaderWidget(QWidget):
             y = self.page_offsets[i]
             path = self.paths[i]
             if path in self.cache:
-                # 🔹 Tell the painter to dynamically draw the massive image into the smaller screen space
                 target_rect = QRect(x_offset, y, self.current_target_width, self.page_heights[i])
                 painter.drawPixmap(target_rect, self.cache[path])
             else:
@@ -504,14 +486,12 @@ class MangaReaderWidget(QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)
         
-        # Image Display
         self.image_label = ReaderImageLabel()
         self.image_label.setStyleSheet("background-color: #1e1e1e;")
         self.image_label.clicked_left.connect(self.prev_page)
         self.image_label.clicked_right.connect(self.next_page)
         self.layout.addWidget(self.image_label, stretch=1)
 
-        # Toolbar
         self.toolbar_widget = QWidget()
         self.toolbar_widget.setStyleSheet("background-color: #2d2d2d; border-top: 1px solid #3d3d3d;")
         self.toolbar_layout = QHBoxLayout(self.toolbar_widget)

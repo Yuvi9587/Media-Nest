@@ -19,7 +19,6 @@ class FirstTimeSetupDialog(QDialog):
         layout.setSpacing(15)
         layout.setContentsMargins(20, 20, 20, 20)
         
-        # --- HEADER ---
         header = QLabel("Welcome to Media Nest!")
         header.setStyleSheet("font-size: 20px; font-weight: bold; color: #00a2ff;")
         header.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -30,7 +29,6 @@ class FirstTimeSetupDialog(QDialog):
         lbl_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(lbl_sub)
         
-        # --- INFO PANEL (THE CRASH COURSE) ---
         info_frame = QFrame()
         info_frame.setStyleSheet("""
             QFrame { background-color: #252526; border-radius: 8px; border: 1px solid #3e3e42; padding: 10px; }
@@ -74,12 +72,10 @@ class FirstTimeSetupDialog(QDialog):
         info_layout.addWidget(lbl_info)
         layout.addWidget(info_frame)
 
-        # --- EXPLICIT ACTION BUTTONS ---
         action_layout = QVBoxLayout()
         action_layout.setSpacing(15)
         action_layout.setContentsMargins(0, 15, 0, 0)
         
-        # Option 1: Kemono Users
         self.btn_link_kemono = QPushButton("Link Kemono Downloader Database")
         self.btn_link_kemono.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_link_kemono.setFixedHeight(45)
@@ -89,7 +85,6 @@ class FirstTimeSetupDialog(QDialog):
         """)
         self.btn_link_kemono.clicked.connect(self.link_kemono_database)
 
-        # Option 2: Non-Kemono Users (Portable Setup)
         self.btn_standalone = QPushButton("I don't have Kemono Downloader (Create Portable Database)")
         self.btn_standalone.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_standalone.setFixedHeight(45)
@@ -105,22 +100,16 @@ class FirstTimeSetupDialog(QDialog):
         layout.addLayout(action_layout)
         self.setStyleSheet("QDialog { background-color: #1e1e1e; }")
 
-    # ==========================================
-    # DOWNLOADER ENGINE
-    # ==========================================
     def download_character_db(self, target_folder):
         """Downloads the character database if it is missing from the folder."""
         db_path = os.path.join(target_folder, "character.db")
         
-        # If it already exists, do nothing!
         if os.path.exists(db_path):
             return True 
 
-        # We must use the RAW GitHub URL to download the actual SQLite file, not the HTML page
         url = "https://raw.githubusercontent.com/Yuvi63771/Rule34/main/characters.db"
         
         try:
-            # Change mouse to loading spinner so the user knows it's doing something
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
             
             response = requests.get(url, timeout=15)
@@ -140,9 +129,6 @@ class FirstTimeSetupDialog(QDialog):
             )
             return False
 
-    # ==========================================
-    # LOGIC 1: LINK EXISTING KEMONO
-    # ==========================================
     def link_kemono_database(self):
         """Allows the user to locate their existing Kemono workspace and validates it."""
         folder = QFileDialog.getExistingDirectory(self, "Locate your Kemono Downloader Workspace")
@@ -152,10 +138,9 @@ class FirstTimeSetupDialog(QDialog):
         library_db_path = os.path.join(target_folder, "library.db")
         
         if os.path.exists(library_db_path):
-            # 🔹 Update button text and check for character.db!
             self.btn_link_kemono.setText("Verifying and downloading assets...")
             self.btn_link_kemono.setEnabled(False)
-            QApplication.processEvents() # Force UI to update
+            QApplication.processEvents()
             
             self.download_character_db(target_folder)
             self.save_and_exit(target_folder, is_new=False)
@@ -165,9 +150,6 @@ class FirstTimeSetupDialog(QDialog):
                 f"Could not find 'library.db' in:\n{target_folder}\n\nPlease make sure you are selecting the main Kemono Downloader database folder."
             )
 
-    # ==========================================
-    # LOGIC 2: PORTABLE STANDALONE MODE
-    # ==========================================
     def create_portable_workspace(self):
         """Creates a 'Database' folder directly next to the Media Nest .exe file."""
         if getattr(sys, 'frozen', False):
@@ -182,9 +164,8 @@ class FirstTimeSetupDialog(QDialog):
             
             self.btn_standalone.setText("Building Workspace and downloading assets...")
             self.btn_standalone.setEnabled(False)
-            QApplication.processEvents() # Force UI to update
+            QApplication.processEvents()
             
-            # Initialize core tables
             db_path = os.path.join(new_workspace, "library.db")
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
@@ -195,7 +176,6 @@ class FirstTimeSetupDialog(QDialog):
             cursor.execute("CREATE TABLE IF NOT EXISTS tagless (hash TEXT PRIMARY KEY, file_path TEXT, file_name TEXT, phash TEXT)")
             cursor.execute("CREATE TABLE IF NOT EXISTS IgnoredPairs (hash1 TEXT, hash2 TEXT, PRIMARY KEY (hash1, hash2))")
             
-            # --- Pagination (Virtual Mangas) Tables ---
             cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangas (manga_id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, cover_image TEXT)")
             cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangaPages (manga_id INTEGER, image_path TEXT, page_number INTEGER, PRIMARY KEY (manga_id, page_number))")
             cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangaTags (manga_id INTEGER, tag_name TEXT, PRIMARY KEY (manga_id, tag_name))")
@@ -203,7 +183,6 @@ class FirstTimeSetupDialog(QDialog):
             conn.commit()
             conn.close()
             
-            # 🔹Download the character.db directly into this new folder!
             self.download_character_db(new_workspace)
             
             self.save_and_exit(new_workspace, is_new=True)
@@ -213,9 +192,6 @@ class FirstTimeSetupDialog(QDialog):
             self.btn_standalone.setEnabled(True)
             QMessageBox.critical(self, "Database Error", f"Failed to initialize portable database:\n{e}")
 
-    # ==========================================
-    # FINAL SAVE
-    # ==========================================
     def save_and_exit(self, path, is_new=False):
         """Saves the path to the Global OS Registry and closes the setup."""
         settings = QSettings("MediaNest", "AppConfig")

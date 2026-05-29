@@ -60,7 +60,6 @@ class LoadMangaDialog(QDialog):
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Get mangas along with their page count
             cursor.execute('''
                 SELECT m.manga_id, m.title, COUNT(p.page_number) as page_count
                 FROM CustomMangas m

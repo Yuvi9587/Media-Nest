@@ -25,11 +25,9 @@ class GallerySection(QWidget):
     def __init__(self):
         super().__init__()
 
-        # --- Size Mode State ---
         self.current_mode = "large"
         self.TILE_WIDTH, self.TILE_HEIGHT, self.ICON_SIZE = self.LARGE
 
-        # --- Asset Path ---
         from Src.Logic.paths import resource_path
         self.asset_dir = resource_path("assets")
         self.svg_dir = os.path.join(self.asset_dir, "Svg")
@@ -38,7 +36,6 @@ class GallerySection(QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)
 
-        # ================= HEADER =================
         header_container = QWidget()
         header_layout = QHBoxLayout(header_container)
         header_layout.setContentsMargins(10, 5, 10, 5)
@@ -49,7 +46,6 @@ class GallerySection(QWidget):
             font-weight: bold;
         """)
 
-        # --- Local File Name Filter ---
         self.name_filter_input = QLineEdit()
         self.name_filter_input.setPlaceholderText("Filter by name...")
         self.name_filter_input.setFixedWidth(180)
@@ -66,7 +62,6 @@ class GallerySection(QWidget):
             }
         """)
 
-        # --- Filter Dropdown ---
         self.filter_combo = QComboBox()
         self.filter_combo.addItems(["All", "Images", "Videos"])
         self.filter_combo.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -87,7 +82,6 @@ class GallerySection(QWidget):
             }
         """)
 
-        # --- SVG Size Toggle Button ---
         self.btn_size_toggle = QPushButton()
         self.btn_size_toggle.setFixedSize(42, 32)
         self.btn_size_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -105,7 +99,6 @@ class GallerySection(QWidget):
             }
         """)
 
-        # Default icon = large
         self.btn_size_toggle.setIcon(QIcon(os.path.join(self.svg_dir, "large.svg")))
         self.btn_size_toggle.setIconSize(QSize(20, 20))
         self.btn_size_toggle.setContentsMargins(0, 0, 0, 0)
@@ -123,7 +116,6 @@ class GallerySection(QWidget):
 
         self.layout.addWidget(header_container)
 
-        # ================= GALLERY GRID =================
         self.list_widget = QListWidget()
         self.list_widget.setViewMode(QListWidget.ViewMode.IconMode)
         self.list_widget.setIconSize(QSize(self.ICON_SIZE, self.ICON_SIZE))
@@ -166,7 +158,6 @@ class GallerySection(QWidget):
 
         self.layout.addWidget(self.list_widget)
 
-    # ================= SIZE TOGGLE =================
     def toggle_size_mode(self):
         if self.current_mode == "large":
             self.current_mode = "medium"
@@ -200,7 +191,6 @@ class GallerySection(QWidget):
             item = self.list_widget.item(i)
             item.setSizeHint(QSize(width, height))
 
-    # ================= POPULATE =================
     def populate(self, items):
         self.list_widget.clear()
 
@@ -226,7 +216,6 @@ class GallerySection(QWidget):
 
             self.list_widget.addItem(item)
 
-    # ================= CLICK =================
     def on_item_clicked(self, item):
         path = item.data(Qt.ItemDataRole.UserRole)
         self.file_selected.emit(path)

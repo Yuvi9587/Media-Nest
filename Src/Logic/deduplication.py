@@ -60,7 +60,6 @@ class DeduplicationWorker(QThread):
                         current_phash = str(imagehash.phash(img, hash_size=16))
                         cursor.execute("UPDATE Images SET phash = ? WHERE hash = ?", (current_phash, md5_hash))
                         
-                        # BATCH COMMIT: Prevents SQLite from bottlenecking the loop
                         images_updated += 1
                         if images_updated % 100 == 0:
                             conn.commit()
@@ -74,7 +73,6 @@ class DeduplicationWorker(QThread):
                         'phash_int': int(current_phash, 16) 
                     })
             
-            # Commit any remaining updates
             if images_updated > 0:
                 conn.commit()
 
@@ -90,7 +88,6 @@ class DeduplicationWorker(QThread):
                 for j in range(i + 1, total_imgs):
                     img2 = valid_images[j]
                     
-                    # NATIVE SPEEDUP: .bit_count() is dramatically faster than bin().count('1') (Requires Python 3.10+)
                     dist = (img1['phash_int'] ^ img2['phash_int']).bit_count()
                     
                     if dist <= self.threshold:

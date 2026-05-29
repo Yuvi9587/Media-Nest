@@ -6,7 +6,6 @@ import re
 import numpy as np
 from PIL import Image
 
-# 🔹 FIXED: Upgraded to PyQt6
 from PyQt6.QtCore import QSettings
 
 warnings.filterwarnings("ignore", category=UserWarning, module="onnxruntime")
@@ -28,7 +27,6 @@ class VisualSorter:
         
         settings = QSettings("MediaDownloader", "VisualSort")
         
-        # 🔹 FIXED: PyQt6 format for grabbing strings from settings
         hw_choice = str(settings.value("execution_provider", "cpu"))
         
         providers = ["CPUExecutionProvider"]
@@ -108,7 +106,6 @@ class VisualSorter:
                     if rule_tags:
                         self.fallback_rules.append((char_name, rule_tags, negative_tags, mandatory_tags))
 
-    # 🔹 FIXED: PyQt6 format for grabbing integers from settings
     def get_current_threshold(self):
         settings = QSettings("MediaDownloader", "VisualSort")
         return int(settings.value("char_threshold", 50)) / 100.0
@@ -169,7 +166,6 @@ class VisualSorter:
                 
                 current_threshold = self.get_current_threshold()
                 
-                # 🔹 FIXED: Grabs top 20 tags instead of just 5 for the tagger UI!
                 top_general_indices = np.argsort(general_preds)[::-1][:20]
                 top_tags_list = [(general_tags[i], float(general_preds[i])) for i in top_general_indices]
 
