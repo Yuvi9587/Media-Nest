@@ -1963,6 +1963,8 @@ class MediaExplorerApp(QMainWindow):
         
         self.ui.image_view_container.show()
 
+        self.ui.lbl_image.clear()
+
         movie = self.ui.lbl_image.movie()
         if movie:
             movie.stop()
@@ -2144,6 +2146,8 @@ class MediaExplorerApp(QMainWindow):
             else:
                 scroll_limit = 100
 
+            if hasattr(self.ui, 'loading_bar'):
+                self.ui.loading_bar.show()
             self.db_search_worker = DatabaseSearchWorker(
                 self.current_db_path, 
                 search_text, 
@@ -2153,6 +2157,7 @@ class MediaExplorerApp(QMainWindow):
                 filter_type=filter_type
             )
             self.db_search_worker.search_finished.connect(self.on_db_search_finished)
+            self.db_search_worker.error_occurred.connect(self.on_db_search_error)
             self.db_search_worker.start()
             
             self.current_search_offset += scroll_limit
@@ -2196,6 +2201,8 @@ class MediaExplorerApp(QMainWindow):
                 
             self.current_search_offset = initial_limit 
 
+            if hasattr(self.ui, 'loading_bar'):
+                self.ui.loading_bar.show()
             self.db_search_worker = DatabaseSearchWorker(
                 self.current_db_path, 
                 search_text, 
@@ -2205,6 +2212,7 @@ class MediaExplorerApp(QMainWindow):
                 filter_type=filter_type
             )
             self.db_search_worker.search_finished.connect(self.on_db_search_finished)
+            self.db_search_worker.error_occurred.connect(self.on_db_search_error)
             self.db_search_worker.start()
             return 
             
@@ -2215,6 +2223,8 @@ class MediaExplorerApp(QMainWindow):
         if search_id != self.current_search_id:
             return 
 
+        if hasattr(self.ui, 'loading_bar'):
+            self.ui.loading_bar.hide()
         self.ui.lbl_placeholder.hide()
 
         if not results and not search_text:
@@ -2335,6 +2345,11 @@ class MediaExplorerApp(QMainWindow):
         if files_for_vid_thumbs: self.vid_thumb_worker.add_to_queue(files_for_vid_thumbs)
 
         self.is_fetching_data = False
+
+    def on_db_search_error(self, error_msg):
+        if hasattr(self.ui, 'loading_bar'):
+            self.ui.loading_bar.hide()
+        print(f"Database search error: {error_msg}")
 
     def render_search_batch(self):
         if getattr(self, 'cancel_search_rendering', False):

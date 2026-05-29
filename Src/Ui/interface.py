@@ -1,7 +1,7 @@
 import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTreeView, 
                              QSplitter, QLabel, QPushButton, QScrollArea, QFrame, 
-                             QSlider, QStyle, QLineEdit, QScrollBar, QSizePolicy)
+                             QSlider, QStyle, QLineEdit, QScrollBar, QSizePolicy, QProgressBar)
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QMouseEvent, QPixmap, QIcon
 from PyQt6.QtMultimediaWidgets import QVideoWidget
@@ -731,6 +731,14 @@ class MainWindowUI:
         search_layout.addWidget(self.search_bar)
 
         self.sidebar_layout.addWidget(search_container)
+
+        self.loading_bar = QProgressBar()
+        self.loading_bar.setRange(0, 0)
+        self.loading_bar.setTextVisible(False)
+        self.loading_bar.setFixedHeight(4)
+        self.loading_bar.setStyleSheet("QProgressBar { border: none; background-color: transparent; } QProgressBar::chunk { background-color: #007acc; border-radius: 2px; }")
+        self.loading_bar.hide()
+        self.sidebar_layout.addWidget(self.loading_bar)
 
         self.tree_view = QTreeView()
         self.tree_view.setHeaderHidden(True)
