@@ -1,0 +1,71 @@
+Media Nest/
+├── Src/
+│   ├── Dialogs/
+│   │   ├── load_manga_dialog.py
+│   │   ├── settings_dialog.py
+│   │   └── setup_dialog.py
+│   ├── Logic/
+│   │   ├── app.py
+│   │   ├── deduplication.py
+│   │   ├── file_ops.py
+│   │   ├── pagination_tab.py
+│   │   ├── paths.py
+│   │   ├── tags.py
+│   │   ├── video_dedup.py
+│   │   └── visual_sorter.py
+│   └── Ui/
+│       ├── gallery.py
+│       ├── interface.py
+│       ├── reader_widget.py
+│       └── theme.py
+├── assets/
+│   ├── 1.png
+│   ├── 2.png
+│   ├── Logo 1.png
+│   ├── Logo.ico
+│   ├── Logo.png
+│   ├── Svg/
+│   │   ├── Medium.svg
+│   │   ├── back 10Sec.svg
+│   │   ├── folder-close.svg
+│   │   ├── folder-open.svg
+│   │   ├── fullscreen.svg
+│   │   ├── large.svg
+│   │   ├── minimize.svg
+│   │   ├── next.svg
+│   │   ├── pause.svg
+│   │   ├── play.svg
+│   │   ├── previous.svg
+│   │   ├── repeat-1.svg
+│   │   ├── repeat-off.svg
+│   │   ├── repeat.svg
+│   │   ├── search.svg
+│   │   ├── skip 10Sec.svg
+│   │   ├── small.svg
+│   │   ├── speaker-high.svg
+│   │   ├── speaker-low.svg
+│   │   ├── speaker-none.svg
+│   │   └── speaker-slash.svg
+│   ├── Svg2/
+│   │   ├── back 10Sec.svg
+│   │   ├── repeat.svg
+│   │   └── skip 10Sec.svg
+│   └── uisvg/
+│       ├── add.svg
+│       ├── ai.svg
+│       ├── cloud.svg
+│       ├── database.svg
+│       ├── folder.svg
+│       ├── handshake.svg
+│       ├── image.svg
+│       ├── loading.svg
+│       ├── manga.svg
+│       ├── remove.svg
+│       ├── search.svg
+│       ├── settings.svg
+│       ├── tag.svg
+│       ├── tools.svg
+│       ├── video.svg
+│       ├── zoom_in.svg
+│       └── zoom_out.svg
+└── main.py

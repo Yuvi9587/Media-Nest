@@ -137,6 +137,11 @@ class SettingsDialog(QDialog):
                         self.current_db_folder = config.get("db_folder", "")
                         
                     self.current_ui_scale = config.get("ui_scale", "1.0")
+                    try:
+                        if float(self.current_ui_scale) < 0.4:
+                            self.current_ui_scale = "0.4"
+                    except (ValueError, TypeError):
+                        pass
                     self.current_strictness = config.get("dedupe_strictness", 0) 
                     self.current_perf_mode = config.get("performance_mode", "balanced")
             except Exception:
@@ -157,12 +162,16 @@ class SettingsDialog(QDialog):
         self.tab_video_dedup = None
         self.tab_video_placeholder = QWidget()
         
+        self.tab_pagination = None
+        self.tab_pagination_placeholder = QWidget()
+        
         self.tabs.addTab(self.tab_database, "Database")
         self.tabs.addTab(self.tab_interface, "Interface")
         self.tabs.addTab(self.tab_tag_placeholder, "Tag Manager") 
         self.tabs.currentChanged.connect(self.on_tab_changed)
         self.tabs.addTab(self.tab_dedupe, "Image Dedup")
         self.tabs.addTab(self.tab_video_placeholder, "Video Dedup")
+        self.tabs.addTab(self.tab_pagination_placeholder, "Pagination")
 
         # --- DATABASE TAB ---
         db_layout = QVBoxLayout(self.tab_database)
@@ -404,7 +413,7 @@ class SettingsDialog(QDialog):
                 self, 
                 "Custom UI Scale", 
                 "Enter UI Scale percentage (e.g. 74):", 
-                100, 25, 400, 1
+                100, 40, 400, 1
             )
             if ok:
                 custom_scale_str = str(val / 100.0)
@@ -655,6 +664,18 @@ class SettingsDialog(QDialog):
                 self.tab_video_dedup = VideoDedupTab(self)
                 self.tabs.removeTab(index)
                 self.tabs.insertTab(index, self.tab_video_dedup, "Video Dedup")
+                self.tabs.setCurrentIndex(index)
+
+        elif tab_name == "Pagination":
+            if self.tab_pagination is None:
+                self.tabs.setTabIcon(index, QIcon(os.path.join(self.asset_base_dir, "assets", "uisvg", "loading.svg")))
+                self.tabs.setTabText(index, "Loading...")
+                QApplication.processEvents()
+                
+                from Src.Logic.pagination_tab import PaginationTab
+                self.tab_pagination = PaginationTab(self)
+                self.tabs.removeTab(index)
+                self.tabs.insertTab(index, self.tab_pagination, "Pagination")
                 self.tabs.setCurrentIndex(index)
 
     def clear_preview(self):

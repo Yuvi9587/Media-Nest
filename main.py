@@ -16,7 +16,13 @@ config_path = os.path.join(base_dir, "config.json")
 try:
     with open(config_path, "r") as f:
         config = json.load(f)
-        scale_value = str(config.get("ui_scale", "1.0")) 
+        scale_value = config.get("ui_scale", "1.0")
+        try:
+            if float(scale_value) < 0.4:
+                scale_value = "0.4"
+        except (ValueError, TypeError):
+            scale_value = "1.0"
+        scale_value = str(scale_value)
 except Exception:
     scale_value = "1.0"
 

@@ -196,9 +196,18 @@ class SingleThumbnailThread(QThread):
                 path = self.queue.pop(0)
             except IndexError:
                 continue
+                
+            # print(f"[ThumbThread] Processing: {path} | Queue remaining: {len(self.queue)}")
 
             is_gallery = os.path.isdir(path)
             target_path = path
+            
+            # 🔹 CUSTOM MANGA SUPPORT
+            if path.startswith("custom_manga:"):
+                parts = path.split("|")
+                if len(parts) >= 2:
+                    target_path = parts[1]
+                    is_gallery = True # Draw it as a stacked gallery!
             
             if is_gallery:
                 # Find the first image in the directory
@@ -223,17 +232,22 @@ class SingleThumbnailThread(QThread):
 
             # 2. GENERATE NEW
             try:
-                reader = QImageReader(target_path)
-                orig_size = reader.size()
-
-                if orig_size.isValid():
-                    ratio = min(TARGET_SIZE / orig_size.width(), TARGET_SIZE / orig_size.height())
-                    new_w = int(orig_size.width() * ratio)
-                    new_h = int(orig_size.height() * ratio)
-                    reader.setScaledSize(QSize(new_w, new_h))
-
-                loaded_image = reader.read()
-                del reader
+                from PIL import Image
+                import io
+                
+                # print(f"[ThumbThread] Generating new for: {target_path}")
+                
+                loaded_image = QImage()
+                with Image.open(target_path) as pil_img:
+                    pil_img.thumbnail((TARGET_SIZE, TARGET_SIZE))
+                    
+                    if pil_img.mode in ("RGBA", "P"):
+                        pil_img = pil_img.convert("RGB")
+                    
+                    buf = io.BytesIO()
+                    pil_img.save(buf, format="JPEG", quality=85)
+                    buf.seek(0)
+                    loaded_image.loadFromData(buf.read(), "JPG")
                 
                 if not loaded_image.isNull():
                     final_image = QImage(TARGET_SIZE, TARGET_SIZE, QImage.Format.Format_ARGB32)
@@ -286,8 +300,9 @@ class SingleThumbnailThread(QThread):
 
                     final_image.save(cache_file_path, "JPG", 85)
                     self.thumbnail_ready.emit(path, final_image)
-            except Exception:
-                pass
+                    # print(f"[ThumbThread] Emitted generated thumbnail for: {path}")
+            except Exception as e:
+                print(f"[ThumbThread] Error generating thumbnail for {path}: {e}")
 
             time.sleep(hdd_sleep)
 
@@ -447,11 +462,11 @@ class DatabaseSearchWorker(QThread):
             if self.filter_type in ["All", "Images"]:
                 manga_query = f"""
                     WITH GalleryAllTags AS (
-                        SELECT MangaTags.gallery_id, Tags.tag_name as tag
+                        SELECT MangaTags.gallery_id, LOWER(REPLACE(Tags.tag_name, ' ', '_')) as tag
                         FROM MangaTags
                         JOIN Tags ON MangaTags.tag_id = Tags.tag_id
                         UNION
-                        SELECT gallery_id, artist as tag
+                        SELECT gallery_id, LOWER(REPLACE(artist, ' ', '_')) as tag
                         FROM MangaGalleries
                         WHERE artist IS NOT NULL AND artist != ''
                     )
@@ -483,6 +498,54 @@ class DatabaseSearchWorker(QThread):
                             valid_results.append((folder_path, title, "gallery"))
                 except sqlite3.OperationalError:
                     pass # MangaGalleries table might not exist yet
+
+            # --- CUSTOM MANGAS (PAGINATION) SEARCH ---
+            if self.filter_type in ["All", "Images"]:
+                custom_query = f"""
+                    WITH CustomAllTags AS (
+                        SELECT manga_id, LOWER(REPLACE(tag_name, ' ', '_')) as tag
+                        FROM CustomMangaTags
+                        UNION
+                        SELECT manga_id, LOWER(REPLACE(title, ' ', '_')) as tag
+                        FROM CustomMangas
+                    )
+                    SELECT CustomMangas.manga_id, CustomMangas.title, CustomMangas.cover_image
+                    FROM CustomMangas
+                    JOIN CustomAllTags ON CustomMangas.manga_id = CustomAllTags.manga_id
+                    WHERE CustomAllTags.tag IN ({placeholders})
+                    GROUP BY CustomMangas.manga_id
+                    HAVING 1=1
+                """
+                custom_params = all_tags.copy()
+                if req_tags:
+                    custom_query += f" AND SUM(CASE WHEN CustomAllTags.tag IN ({req_placeholders}) THEN 1 ELSE 0 END) = ?"
+                    custom_params.extend(req_tags)
+                    custom_params.append(len(req_tags))
+                if opt_tags:
+                    custom_query += f" AND SUM(CASE WHEN CustomAllTags.tag IN ({opt_placeholders}) THEN 1 ELSE 0 END) > 0"
+                    custom_params.extend(opt_tags)
+                custom_query += " LIMIT ? OFFSET ?"
+                custom_params.extend([self.limit, self.offset])
+
+                try:
+                    cursor.execute(custom_query, custom_params)
+                    custom_results = cursor.fetchall()
+                    for manga_id, title, cover_image in custom_results:
+                        if not self.is_running: return
+                        
+                        # Fetch extra pages for the stacked thumbnail background
+                        cursor2 = conn.cursor()
+                        cursor2.execute("SELECT image_path FROM CustomMangaPages WHERE manga_id = ? AND image_path != ? ORDER BY page_number ASC LIMIT 3", (manga_id, cover_image))
+                        extra_pages = [r[0] for r in cursor2.fetchall()]
+                        
+                        custom_path = f"custom_manga:{manga_id}|{cover_image}"
+                        for ex in extra_pages:
+                            custom_path += f"|{ex}"
+                            
+                        if os.path.exists(cover_image):
+                            valid_results.append((custom_path, title, "gallery"))
+                except sqlite3.OperationalError:
+                    pass # CustomMangas table might not exist yet
 
             is_appending = self.offset > 0
             self.search_finished.emit(valid_results, dict(folders_map), self.search_text, is_appending, self.search_id)
@@ -592,14 +655,13 @@ class MultiTagCompleter(QCompleter):
 
     def splitPath(self, path):
         if ',' in path:
-            search_term = path.split(',')[-1].strip()
+            search_term = path.split(',')[-1].lstrip()
         else:
-            search_term = path.strip()
+            search_term = path.lstrip()
             
         if search_term.startswith('~'):
             search_term = search_term[1:]
             
-        search_term = search_term.replace(' ', '_')
         return [search_term]
 
 # --- SCANNER WORKER ---
@@ -1521,16 +1583,15 @@ class MediaExplorerApp(QMainWindow):
                 self.vid_thumb_worker.resume()
             
         # 2. Stop and hide the image viewer
-        if getattr(self, "current_image_path", None):
-            self.current_image_path = None
-            movie = self.ui.lbl_image.movie()
-            if movie:
-                movie.stop()
-                self.ui.lbl_image.setMovie(None)
-            self.ui.image_view_container.hide()
-            self.ui.manhwa_reader.hide()
-            if hasattr(self.ui, 'manga_reader'):
-                self.ui.manga_reader.hide()
+        self.current_image_path = None
+        movie = self.ui.lbl_image.movie()
+        if movie:
+            movie.stop()
+            self.ui.lbl_image.setMovie(None)
+        self.ui.image_view_container.hide()
+        self.ui.manhwa_reader.hide()
+        if hasattr(self.ui, 'manga_reader'):
+            self.ui.manga_reader.hide()
             
         # 3. Bring back the default placeholder
         self.ui.lbl_placeholder.setText("Select a file to view")
@@ -1981,6 +2042,12 @@ class MediaExplorerApp(QMainWindow):
         if hasattr(self, 'clear_player_timer') and self.clear_player_timer.isActive():
             self.clear_player_timer.stop()
             
+        # 🔹 CUSTOM MANGA HANDLING
+        if path.startswith("custom_manga:"):
+            self.current_image_path = None
+            self.show_custom_manga(path)
+            return
+            
         name = path.lower()
         is_gallery = os.path.isdir(path)
         is_image = any(name.endswith(ext) for ext in self.clean_img_exts)
@@ -2022,6 +2089,47 @@ class MediaExplorerApp(QMainWindow):
         if hasattr(self.ui, 'manga_reader'):
             self.ui.manga_reader.show()
             self.ui.manga_reader.load_folder(path)
+
+    def show_custom_manga(self, path):
+        self.media_player.stop()
+        self.media_player.setSource(QUrl())
+        self.ui.video_container.hide() 
+        self.ui.lbl_placeholder.hide()
+        
+        if hasattr(self, "thumb_worker"):
+            self.thumb_worker.resume()
+        if hasattr(self, "vid_thumb_worker") and hasattr(self.vid_thumb_worker, "resume"):
+            self.vid_thumb_worker.resume()
+            
+        self.ui.image_view_container.show()
+        
+        movie = self.ui.lbl_image.movie()
+        if movie:
+            movie.stop()
+            self.ui.lbl_image.setMovie(None)
+            movie.deleteLater()
+            
+        self.ui.lbl_image.hide()
+        self.ui.manhwa_reader.hide()
+        self.ui.manhwa_zoom_slider.hide()
+        
+        # We need to query DB to get the paths for this manga_id
+        manga_id = int(path.split("|")[0].replace("custom_manga:", ""))
+        paths = []
+        try:
+            conn = sqlite3.connect(self.current_db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT image_path FROM CustomMangaPages WHERE manga_id = ? ORDER BY page_number ASC", (manga_id,))
+            paths = [row[0].strip() for row in cursor.fetchall()]
+            conn.close()
+        except Exception as e:
+            print(f"Exception in show_custom_manga: {e}")
+            
+        print(f"DEBUG: Loaded {len(paths)} pages for manga_id {manga_id}")
+            
+        if hasattr(self.ui, 'manga_reader'):
+            self.ui.manga_reader.show()
+            self.ui.manga_reader.load_pages(paths)
 
     def show_image(self, path):
         self.media_player.stop()
@@ -2613,6 +2721,61 @@ class MediaExplorerApp(QMainWindow):
         else:
             QMessageBox.critical(self, "Error", f"Could not find library.db in:\n{db_folder}")
 
+    def reload_autocomplete_tags(self):
+        """Reloads all tags from the database and updates the completers (called when new custom mangas are created)."""
+        if not hasattr(self, 'db_connection'):
+            return
+            
+        cursor = self.db_connection.cursor()
+        cursor.execute("SELECT tag_name FROM Tags")
+        all_tags = set([row[0] for row in cursor.fetchall()])
+        
+        try:
+            cursor.execute("SELECT DISTINCT artist FROM MangaGalleries WHERE artist IS NOT NULL AND artist != ''")
+            artists = [row[0] for row in cursor.fetchall()]
+            all_tags.update(artists)
+        except sqlite3.OperationalError:
+            pass
+            
+        try:
+            # Also try to pull from characters.db!
+            char_db_path = os.path.join(self.current_db_folder, "characters.db")
+            if os.path.exists(char_db_path):
+                char_conn = sqlite3.connect(char_db_path)
+                char_cursor = char_conn.cursor()
+                char_cursor.execute("SELECT DISTINCT character_name FROM Characters")
+                chars = [row[0] for row in char_cursor.fetchall()]
+                all_tags.update(chars)
+                char_conn.close()
+        except Exception:
+            pass
+            
+        try:
+            cursor.execute("SELECT DISTINCT tag_name FROM CustomMangaTags")
+            custom_tags = [row[0] for row in cursor.fetchall()]
+            all_tags.update(custom_tags)
+            
+            cursor.execute("SELECT DISTINCT title FROM CustomMangas WHERE title IS NOT NULL AND title != ''")
+            custom_titles = [row[0] for row in cursor.fetchall()]
+            all_tags.update(custom_titles)
+        except sqlite3.OperationalError:
+            pass
+            
+        all_tags = sorted(list(all_tags))
+        
+        if hasattr(self, 'tag_completer'):
+            self.tag_completer.model().setStringList(all_tags)
+            
+        # Also update pagination tab if it exists
+        try:
+            if hasattr(self, 'settings_dialog') and hasattr(self.settings_dialog, 'tab_pagination'):
+                if hasattr(self.settings_dialog.tab_pagination, 'tag_completer'):
+                    self.settings_dialog.tab_pagination.tag_completer.model().setStringList(all_tags)
+                if hasattr(self.settings_dialog.tab_pagination, 'custom_tags_completer'):
+                    self.settings_dialog.tab_pagination.custom_tags_completer.model().setStringList(all_tags)
+        except Exception:
+            pass
+
     def connect_to_database(self, db_path):
         """Establishes the SQLite connection and updates the UI."""
         try:
@@ -2623,6 +2786,13 @@ class MediaExplorerApp(QMainWindow):
             # LOAD TAGS AND SETUP AUTOCOMPLETE
             # ==========================================
             cursor = self.db_connection.cursor()
+            
+            # --- Initialize Pagination Tables (For existing databases) ---
+            cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangas (manga_id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, cover_image TEXT)")
+            cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangaPages (manga_id INTEGER, image_path TEXT, page_number INTEGER, PRIMARY KEY (manga_id, page_number))")
+            cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangaTags (manga_id INTEGER, tag_name TEXT, PRIMARY KEY (manga_id, tag_name))")
+            self.db_connection.commit()
+            
             cursor.execute("SELECT tag_name FROM Tags")
             # Fetch all unique tags
             all_tags = set([row[0] for row in cursor.fetchall()])
@@ -2634,6 +2804,31 @@ class MediaExplorerApp(QMainWindow):
                 all_tags.update(artists)
             except sqlite3.OperationalError:
                 pass # In case MangaGalleries table doesn't exist yet
+                
+            try:
+                # Also try to pull from characters.db!
+                char_db_path = os.path.join(self.current_db_folder, "characters.db")
+                if os.path.exists(char_db_path):
+                    char_conn = sqlite3.connect(char_db_path)
+                    char_cursor = char_conn.cursor()
+                    char_cursor.execute("SELECT DISTINCT character_name FROM Characters")
+                    chars = [row[0] for row in char_cursor.fetchall()]
+                    all_tags.update(chars)
+                    char_conn.close()
+            except Exception:
+                pass
+                
+            # 🔹 Also fetch custom manga tags and titles!
+            try:
+                cursor.execute("SELECT DISTINCT tag_name FROM CustomMangaTags")
+                custom_tags = [row[0] for row in cursor.fetchall()]
+                all_tags.update(custom_tags)
+                
+                cursor.execute("SELECT DISTINCT title FROM CustomMangas WHERE title IS NOT NULL AND title != ''")
+                custom_titles = [row[0] for row in cursor.fetchall()]
+                all_tags.update(custom_titles)
+            except sqlite3.OperationalError:
+                pass
                 
             all_tags = sorted(list(all_tags))
             

@@ -95,7 +95,10 @@ class ManhwaReaderWidget(QWidget):
         ]
         files.sort(key=lambda p: natural_key(os.path.basename(p)))
         
-        self.paths = files
+        self.load_pages(files, jump_to_path)
+
+    def load_pages(self, paths, jump_to_path=None):
+        self.paths = paths
         self.page_heights = [self.estimated_height for _ in self.paths]
         self.recalculate_offsets()
         self.cache.clear()
@@ -220,17 +223,29 @@ class ManhwaReaderWidget(QWidget):
 class ReaderImageLabel(QLabel):
     clicked_left = pyqtSignal()
     clicked_right = pyqtSignal()
+    zoom_changed = pyqtSignal(float)
 
     def __init__(self):
         super().__init__()
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.is_zoomed = False
+        self._zoom_factor = 1.0
         self._raw_pixmap = None
         self._single_click_timer = QTimer()
         self._single_click_timer.setSingleShot(True)
         self._single_click_timer.timeout.connect(self._on_single_click)
         self._last_click_pos = None
+        
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        self.shortcut_zoom_in_1 = QShortcut(QKeySequence("Ctrl++"), self)
+        self.shortcut_zoom_in_1.activated.connect(self.zoom_in_keyboard)
+        self.shortcut_zoom_in_2 = QShortcut(QKeySequence("Ctrl+="), self)
+        self.shortcut_zoom_in_2.activated.connect(self.zoom_in_keyboard)
+        
+        self.shortcut_zoom_out = QShortcut(QKeySequence("Ctrl+-"), self)
+        self.shortcut_zoom_out.activated.connect(self.zoom_out_keyboard)
+        
         self.update_cursor()
 
     def update_cursor(self):
@@ -247,6 +262,7 @@ class ReaderImageLabel(QLabel):
     def set_raw_pixmap(self, pixmap):
         self._raw_pixmap = pixmap
         self.is_zoomed = False
+        self._zoom_factor = 1.0
         self.setMinimumSize(0, 0)
         self.setMaximumSize(16777215, 16777215)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
@@ -326,6 +342,8 @@ class ReaderImageLabel(QLabel):
             prop_y = (click_y - offset_y) / drawn_h
             
             self.is_zoomed = True
+            self._zoom_factor = 1.0
+            self.zoom_changed.emit(self._zoom_factor)
             
             raw_w = self._raw_pixmap.width()
             raw_h = self._raw_pixmap.height()
@@ -359,19 +377,118 @@ class ReaderImageLabel(QLabel):
             QTimer.singleShot(50, apply_scroll)
             self.update_cursor()
         else:
+            self.reset_zoom()
+
+    def reset_zoom(self):
+        if self.is_zoomed:
             self.is_zoomed = False
+            self._zoom_factor = 1.0
             self.setMinimumSize(0, 0)
             self.setMaximumSize(16777215, 16777215)
             self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
             self._scale_content()
             self.update_cursor()
+            self.zoom_changed.emit(0.0)
+
+    def zoom_in_keyboard(self):
+        if self.is_zoomed:
+            self._apply_zoom(1.1)
+
+    def zoom_out_keyboard(self):
+        if self.is_zoomed:
+            self._apply_zoom(1 / 1.1)
+
+    def _apply_zoom(self, factor, focus_pos=None):
+        from PyQt6.QtCore import Qt, QPoint, QTimer
+        scroll_area = self.get_scroll_area()
+        if not scroll_area or not self._raw_pixmap or self._raw_pixmap.isNull():
+            return
+            
+        if self.width() == 0 or self.height() == 0:
+            return
+
+        drawn_pixmap = self.pixmap()
+        if not drawn_pixmap:
+            return
+
+        drawn_w = drawn_pixmap.width()
+        drawn_h = drawn_pixmap.height()
+        
+        offset_x = (self.width() - drawn_w) / 2.0
+        offset_y = (self.height() - drawn_h) / 2.0
+        
+        if focus_pos:
+            mouse_x = focus_pos.x()
+            mouse_y = focus_pos.y()
+            viewport_pos = self.mapTo(scroll_area.viewport(), focus_pos)
+        else:
+            viewport_center = scroll_area.viewport().rect().center()
+            label_center = self.mapFrom(scroll_area.viewport(), viewport_center)
+            mouse_x = label_center.x()
+            mouse_y = label_center.y()
+            viewport_pos = viewport_center
+
+        if mouse_x < offset_x: mouse_x = offset_x
+        if mouse_x > offset_x + drawn_w: mouse_x = offset_x + drawn_w
+        if mouse_y < offset_y: mouse_y = offset_y
+        if mouse_y > offset_y + drawn_h: mouse_y = offset_y + drawn_h
+        
+        prop_x = (mouse_x - offset_x) / drawn_w
+        prop_y = (mouse_y - offset_y) / drawn_h
+
+        new_zoom = self._zoom_factor * factor
+        
+        if new_zoom < 0.1: new_zoom = 0.1
+        if new_zoom > 10.0: new_zoom = 10.0
+        
+        self._zoom_factor = new_zoom
+        self.zoom_changed.emit(self._zoom_factor)
+        
+        raw_w = self._raw_pixmap.width()
+        raw_h = self._raw_pixmap.height()
+        
+        new_w = max(1, int(raw_w * self._zoom_factor))
+        new_h = max(1, int(raw_h * self._zoom_factor))
+        
+        self.setMinimumSize(new_w, new_h)
+        
+        scaled_pixmap = self._raw_pixmap.scaled(
+            new_w, new_h,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.FastTransformation
+        )
+        super().setPixmap(scaled_pixmap)
+        
+        def apply_scroll():
+            content_widget = scroll_area.widget()
+            if not content_widget:
+                return
+            
+            new_offset_x = max(0, (self.width() - new_w) / 2.0)
+            new_offset_y = max(0, (self.height() - new_h) / 2.0)
+            
+            target_x = int(new_offset_x + prop_x * new_w)
+            target_y = int(new_offset_y + prop_y * new_h)
+            
+            target_pt = self.mapTo(content_widget, QPoint(target_x, target_y))
+            
+            new_scroll_x = target_pt.x() - viewport_pos.x()
+            new_scroll_y = target_pt.y() - viewport_pos.y()
+            
+            scroll_area.horizontalScrollBar().setValue(new_scroll_x)
+            scroll_area.verticalScrollBar().setValue(new_scroll_y)
+            
+        QTimer.singleShot(0, apply_scroll)
 
     def wheelEvent(self, event):
         from PyQt6.QtCore import Qt
         scroll_area = self.get_scroll_area()
         if scroll_area and self.is_zoomed and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-            h_bar = scroll_area.horizontalScrollBar()
-            h_bar.setValue(h_bar.value() - event.angleDelta().y())
+            delta = event.angleDelta().y()
+            if delta == 0:
+                return
+            factor = 1.1 if delta > 0 else (1 / 1.1)
+            self._apply_zoom(factor, event.position().toPoint())
             event.accept()
         else:
             super().wheelEvent(event)
@@ -433,7 +550,10 @@ class MangaReaderWidget(QWidget):
         ]
         files.sort(key=lambda p: natural_key(os.path.basename(p)))
         
-        self.paths = files
+        self.load_pages(files, jump_to_path)
+
+    def load_pages(self, paths, jump_to_path=None):
+        self.paths = paths
         self.current_page = 0
         if jump_to_path and jump_to_path in self.paths:
             self.current_page = self.paths.index(jump_to_path)

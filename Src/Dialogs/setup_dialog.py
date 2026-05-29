@@ -195,6 +195,11 @@ class FirstTimeSetupDialog(QDialog):
             cursor.execute("CREATE TABLE IF NOT EXISTS tagless (hash TEXT PRIMARY KEY, file_path TEXT, file_name TEXT, phash TEXT)")
             cursor.execute("CREATE TABLE IF NOT EXISTS IgnoredPairs (hash1 TEXT, hash2 TEXT, PRIMARY KEY (hash1, hash2))")
             
+            # --- Pagination (Virtual Mangas) Tables ---
+            cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangas (manga_id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, cover_image TEXT)")
+            cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangaPages (manga_id INTEGER, image_path TEXT, page_number INTEGER, PRIMARY KEY (manga_id, page_number))")
+            cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangaTags (manga_id INTEGER, tag_name TEXT, PRIMARY KEY (manga_id, tag_name))")
+            
             conn.commit()
             conn.close()
             

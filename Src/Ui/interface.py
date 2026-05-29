@@ -41,6 +41,8 @@ class CustomVideoWidget(QVideoWidget):
 
 class DynamicImageLabel(QLabel):
     """A smart label that natively recalculates image/GIF scale during ANY UI resize (like dragging splitters)."""
+    zoom_changed = pyqtSignal(float)
+
     def __init__(self):
         super().__init__()
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -48,6 +50,17 @@ class DynamicImageLabel(QLabel):
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self._raw_pixmap = None
         self.is_zoomed = False
+        self._zoom_factor = 1.0
+        
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        self.shortcut_zoom_in_1 = QShortcut(QKeySequence("Ctrl++"), self)
+        self.shortcut_zoom_in_1.activated.connect(self.zoom_in_keyboard)
+        self.shortcut_zoom_in_2 = QShortcut(QKeySequence("Ctrl+="), self)
+        self.shortcut_zoom_in_2.activated.connect(self.zoom_in_keyboard)
+        
+        self.shortcut_zoom_out = QShortcut(QKeySequence("Ctrl+-"), self)
+        self.shortcut_zoom_out.activated.connect(self.zoom_out_keyboard)
+        
         self.update_cursor()
 
     def update_cursor(self):
@@ -63,6 +76,7 @@ class DynamicImageLabel(QLabel):
     def clear(self):
         self._raw_pixmap = None
         self.is_zoomed = False
+        self._zoom_factor = 1.0
         self.setMinimumSize(0, 0)
         self.setMaximumSize(16777215, 16777215)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
@@ -72,6 +86,7 @@ class DynamicImageLabel(QLabel):
     def set_raw_pixmap(self, pixmap):
         self._raw_pixmap = pixmap
         self.is_zoomed = False
+        self._zoom_factor = 1.0
         self.setMinimumSize(0, 0)
         self.setMaximumSize(16777215, 16777215)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
@@ -150,6 +165,8 @@ class DynamicImageLabel(QLabel):
             prop_y = (click_y - offset_y) / drawn_h
             
             self.is_zoomed = True
+            self._zoom_factor = 1.0
+            self.zoom_changed.emit(self._zoom_factor)
             
             raw_w = self._raw_pixmap.width()
             raw_h = self._raw_pixmap.height()
@@ -185,23 +202,208 @@ class DynamicImageLabel(QLabel):
             
         else:
             # We are zooming OUT.
+            self.reset_zoom()
+
+    def reset_zoom(self):
+        if self.is_zoomed:
             self.is_zoomed = False
+            self._zoom_factor = 1.0
             self.setMinimumSize(0, 0)
             self.setMaximumSize(16777215, 16777215)
             self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
             self._scale_content()
             self.update_cursor()
+            self.zoom_changed.emit(0.0)
+
+    def zoom_in_keyboard(self):
+        if self.is_zoomed:
+            self._apply_zoom(1.1)
+
+    def zoom_out_keyboard(self):
+        if self.is_zoomed:
+            self._apply_zoom(1 / 1.1)
+
+    def _apply_zoom(self, factor, focus_pos=None):
+        from PyQt6.QtCore import Qt, QPoint, QTimer
+        scroll_area = self.get_scroll_area()
+        if not scroll_area or not self._raw_pixmap or self._raw_pixmap.isNull():
+            return
+            
+        if self.width() == 0 or self.height() == 0:
+            return
+
+        drawn_pixmap = self.pixmap()
+        if not drawn_pixmap:
+            return
+
+        drawn_w = drawn_pixmap.width()
+        drawn_h = drawn_pixmap.height()
+        
+        offset_x = (self.width() - drawn_w) / 2.0
+        offset_y = (self.height() - drawn_h) / 2.0
+        
+        if focus_pos:
+            mouse_x = focus_pos.x()
+            mouse_y = focus_pos.y()
+            viewport_pos = self.mapTo(scroll_area.viewport(), focus_pos)
+        else:
+            viewport_center = scroll_area.viewport().rect().center()
+            label_center = self.mapFrom(scroll_area.viewport(), viewport_center)
+            mouse_x = label_center.x()
+            mouse_y = label_center.y()
+            viewport_pos = viewport_center
+
+        if mouse_x < offset_x: mouse_x = offset_x
+        if mouse_x > offset_x + drawn_w: mouse_x = offset_x + drawn_w
+        if mouse_y < offset_y: mouse_y = offset_y
+        if mouse_y > offset_y + drawn_h: mouse_y = offset_y + drawn_h
+        
+        prop_x = (mouse_x - offset_x) / drawn_w
+        prop_y = (mouse_y - offset_y) / drawn_h
+
+        new_zoom = self._zoom_factor * factor
+        
+        if new_zoom < 0.1: new_zoom = 0.1
+        if new_zoom > 10.0: new_zoom = 10.0
+        
+        self._zoom_factor = new_zoom
+        self.zoom_changed.emit(self._zoom_factor)
+        
+        raw_w = self._raw_pixmap.width()
+        raw_h = self._raw_pixmap.height()
+        
+        new_w = max(1, int(raw_w * self._zoom_factor))
+        new_h = max(1, int(raw_h * self._zoom_factor))
+        
+        self.setMinimumSize(new_w, new_h)
+        
+        scaled_pixmap = self._raw_pixmap.scaled(
+            new_w, new_h,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.FastTransformation
+        )
+        super().setPixmap(scaled_pixmap)
+        
+        def apply_scroll():
+            content_widget = scroll_area.widget()
+            if not content_widget:
+                return
+            
+            new_offset_x = max(0, (self.width() - new_w) / 2.0)
+            new_offset_y = max(0, (self.height() - new_h) / 2.0)
+            
+            target_x = int(new_offset_x + prop_x * new_w)
+            target_y = int(new_offset_y + prop_y * new_h)
+            
+            target_pt = self.mapTo(content_widget, QPoint(target_x, target_y))
+            
+            new_scroll_x = target_pt.x() - viewport_pos.x()
+            new_scroll_y = target_pt.y() - viewport_pos.y()
+            
+            scroll_area.horizontalScrollBar().setValue(new_scroll_x)
+            scroll_area.verticalScrollBar().setValue(new_scroll_y)
+            
+        QTimer.singleShot(0, apply_scroll)
 
     def wheelEvent(self, event):
         from PyQt6.QtCore import Qt
         scroll_area = self.get_scroll_area()
         if scroll_area and self.is_zoomed and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-            h_bar = scroll_area.horizontalScrollBar()
-            # angleDelta().y() is positive for scrolling up. Going up = scrolling left (decreasing value).
-            h_bar.setValue(h_bar.value() - event.angleDelta().y())
+            delta = event.angleDelta().y()
+            if delta == 0:
+                return
+            factor = 1.1 if delta > 0 else (1 / 1.1)
+            self._apply_zoom(factor, event.position().toPoint())
             event.accept()
         else:
             super().wheelEvent(event)
+
+class ZoomOverlay(QWidget):
+    zoom_in_requested = pyqtSignal()
+    zoom_out_requested = pyqtSignal()
+    reset_requested = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.layout = QHBoxLayout(self)
+        self.layout.setContentsMargins(10, 5, 10, 5)
+        self.layout.setSpacing(5)
+        
+        self.btn_minus = QPushButton("-")
+        self.btn_minus.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_minus.clicked.connect(self.zoom_out_requested.emit)
+        
+        self.lbl_percent = QLabel("100%")
+        
+        self.btn_plus = QPushButton("+")
+        self.btn_plus.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_plus.clicked.connect(self.zoom_in_requested.emit)
+        
+        self.btn_reset = QPushButton("Reset")
+        self.btn_reset.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_reset.clicked.connect(self.reset_requested.emit)
+        
+        self.layout.addWidget(self.btn_minus)
+        self.layout.addWidget(self.lbl_percent)
+        self.layout.addWidget(self.btn_plus)
+        self.layout.addWidget(self.btn_reset)
+        
+        self.setStyleSheet("""
+            ZoomOverlay {
+                background-color: rgba(45, 45, 48, 220);
+                border-radius: 8px;
+                border: 1px solid #3e3e42;
+            }
+            QPushButton {
+                background-color: #3e3e42;
+                color: white;
+                font-weight: bold;
+                border: none;
+                border-radius: 4px;
+                padding: 4px 10px;
+            }
+            QPushButton:hover {
+                background-color: #007acc;
+            }
+            QLabel {
+                color: white;
+                font-weight: bold;
+                min-width: 45px;
+                qproperty-alignment: AlignCenter;
+            }
+        """)
+        
+        from PyQt6.QtCore import QTimer
+        self.hide_timer = QTimer()
+        self.hide_timer.setSingleShot(True)
+        self.hide_timer.timeout.connect(self.hide)
+        
+        if parent:
+            parent.installEventFilter(self)
+            
+    def eventFilter(self, obj, event):
+        from PyQt6.QtCore import QEvent
+        if obj == self.parent() and event.type() == QEvent.Type.Resize:
+            self.update_position()
+        return super().eventFilter(obj, event)
+        
+    def show_zoom(self, zoom_factor):
+        if zoom_factor == 0.0:
+            self.hide()
+            return
+            
+        self.lbl_percent.setText(f"{int(zoom_factor * 100)}%")
+        self.adjustSize()
+        self.update_position()
+        self.show()
+        self.raise_()
+        self.hide_timer.start(5000)
+        
+    def update_position(self):
+        if self.parent():
+            pr = self.parent().rect()
+            self.move(pr.width() - self.width() - 30, 20)
 
 class VideoContainer(QWidget):
     def __init__(self, main_window):
@@ -665,6 +867,19 @@ class MainWindowUI:
         self.image_view_layout.addWidget(self.scroll_area)        # Left: Image
         self.image_view_layout.addWidget(self.manhwa_zoom_slider) # Middle: Zoom Slider
         self.image_view_layout.addWidget(self.main_scrollbar)     # Right: Custom Scrollbar
+
+        self.zoom_overlay = ZoomOverlay(self.image_view_container)
+        self.zoom_overlay.hide()
+        
+        self.lbl_image.zoom_changed.connect(self.zoom_overlay.show_zoom)
+        self.zoom_overlay.zoom_in_requested.connect(self.lbl_image.zoom_in_keyboard)
+        self.zoom_overlay.zoom_out_requested.connect(self.lbl_image.zoom_out_keyboard)
+        self.zoom_overlay.reset_requested.connect(self.lbl_image.reset_zoom)
+        
+        self.manga_reader.image_label.zoom_changed.connect(self.zoom_overlay.show_zoom)
+        self.zoom_overlay.zoom_in_requested.connect(self.manga_reader.image_label.zoom_in_keyboard)
+        self.zoom_overlay.zoom_out_requested.connect(self.manga_reader.image_label.zoom_out_keyboard)
+        self.zoom_overlay.reset_requested.connect(self.manga_reader.image_label.reset_zoom)
 
         self.image_view_container.hide() 
 
