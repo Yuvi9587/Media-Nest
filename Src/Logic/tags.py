@@ -1,10 +1,13 @@
 import os
+import sys
 import sqlite3
 import hashlib
 import requests
 import threading
 import datetime
 import imagehash
+import time
+import uuid
 from PIL import Image
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QLineEdit, QPushButton, QGroupBox, QListWidget,
@@ -12,11 +15,12 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QSplitter, QSizePolicy, QApplication, QDialog, 
                              QProgressBar, QRadioButton, QButtonGroup, QCheckBox,
                              QPlainTextEdit, QStackedWidget, QSlider)
-from PyQt6.QtCore import Qt, QStringListModel, QThread, pyqtSignal, QSize, QUrl
+from PyQt6.QtCore import Qt, QStringListModel, QThread, pyqtSignal, QSize, QUrl, QTimer, QSettings
 from PyQt6.QtGui import QPixmap, QImageReader, QMovie, QIcon, QColor
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 from Src.Logic.paths import resource_path
+from Src.Logic.visual_sorter import VisualSorter
 
 class ResponsiveImageLabel(QLabel):
     """A smart label that dynamically resizes images AND GIFs to fit any screen."""
@@ -146,8 +150,8 @@ class UniversalMediaViewer(QWidget):
         self.video_layout.addLayout(self.controls_layout)
         self.stack.addWidget(self.video_container)
 
-        self.media_player = QMediaPlayer()
-        self.audio_output = QAudioOutput()
+        self.media_player = QMediaPlayer(self)
+        self.audio_output = QAudioOutput(self)
         self.audio_output.setVolume(0.5) 
         self.media_player.setAudioOutput(self.audio_output)
         self.media_player.setVideoOutput(self.video_widget)
@@ -244,6 +248,93 @@ class UniversalMediaViewer(QWidget):
         self.media_player.setSource(QUrl()) 
         self.stack.setCurrentIndex(0)
         self.image_label.clear_image(text)
+
+class MultiTagCompleter(QCompleter):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def pathFromIndex(self, index):
+        path = super().pathFromIndex(index)
+        text = self.widget().text()
+        if ',' in text:
+            prefix = text[:text.rfind(',') + 1]
+            return prefix + " " + path
+        return path
+
+    def splitPath(self, path):
+        if ',' in path:
+            return [path.split(',')[-1].strip()]
+        return [path]
+
+
+class PersistentCloudWorker(QThread):
+    log_msg = pyqtSignal(str)
+    
+    def __init__(self, db_dir):
+        super().__init__()
+        self.db_dir = db_dir
+        self.queue_db = os.path.join(self.db_dir, "cloud_queue.db")
+        self.is_running = True
+        self.ensure_db()
+        
+    def ensure_db(self):
+        try:
+            conn = sqlite3.connect(self.queue_db)
+            cursor = conn.cursor()
+            cursor.execute('''CREATE TABLE IF NOT EXISTS upload_queue (
+                              id INTEGER PRIMARY KEY AUTOINCREMENT,
+                              hash TEXT,
+                              tags TEXT)''')
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            self.log_msg.emit(f"CLOUD QUEUE ERR: {e}")
+
+    def run(self):
+        
+        url = "https://jhzshjwkeljwuovfyasa.supabase.co/rest/v1/unapproved_queue"
+        key = "sb_publishable_U38Za9kpw-oLzHFRMC5wyA_VuI6OElh"
+        
+        settings = QSettings("MediaNest", "CloudConfig")
+        user_token = settings.value("anon_user_token", "", type=str)
+        if not user_token:
+            user_token = str(uuid.uuid4())
+            settings.setValue("anon_user_token", user_token)
+
+        headers = {"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json", "Prefer": "return=minimal"}
+        
+        while self.is_running:
+            try:
+                conn = sqlite3.connect(self.queue_db)
+                cursor = conn.cursor()
+                cursor.execute("SELECT id, hash, tags FROM upload_queue ORDER BY id ASC LIMIT 1")
+                row = cursor.fetchone()
+                
+                if not row:
+                    conn.close()
+                    time.sleep(2.0)
+                    continue
+                    
+                row_id, hash_val, tags_str = row
+                payload = {"hash": hash_val, "suggested_tags": tags_str, "submitted_by_token": user_token}
+                
+                response = requests.post(url, json=payload, headers=headers, timeout=5)
+                if response.status_code in [200, 201, 204]:
+                    cursor.execute("DELETE FROM upload_queue WHERE id = ?", (row_id,))
+                    conn.commit()
+                else:
+                    self.log_msg.emit(f"CLOUD SYNC WARN: Retrying in a few moments (HTTP {response.status_code})")
+                    time.sleep(5.0)
+                
+                conn.close()
+                time.sleep(0.5) 
+            except Exception as e:
+                time.sleep(5.0) 
+
+    def stop(self):
+        self.is_running = False
+        self.wait()
+
 
 class CloudSyncThread(QThread):
     progress = pyqtSignal(int, int)
@@ -499,7 +590,64 @@ class TagManagerTab(QWidget):
         self.log_signal.connect(self.append_log_to_console)
 
         self.setup_ui()
+        
+        self.pending_thumbnails = {}
+        self.thumbnail_map = {}
+        self.pending_cloud_matches = {}
+        self.pending_tag_changes = {}
+        self.pending_renames = {}
+        
+        # Local import to avoid circular dependency
+        from Src.Logic.app import SingleThumbnailThread, VideoThumbnailer
+        self.thumb_worker = SingleThumbnailThread(perf_mode="balanced")
+        self.thumb_worker.thumbnail_ready.connect(self.on_thumbnail_ready)
+        self.thumb_worker.start()
+
+        self.vid_thumb_worker = VideoThumbnailer()
+        self.vid_thumb_worker.thumbnail_ready.connect(self.on_thumbnail_ready)
+
+        self.thumb_apply_timer = QTimer(self)
+        self.thumb_apply_timer.timeout.connect(self.apply_pending_thumbnails)
+        self.thumb_apply_timer.start(50)
+        
+        db_folder = self.settings_dialog.db_path_input.text().strip()
+        if os.path.exists(db_folder):
+            self.persistent_cloud_worker = PersistentCloudWorker(db_folder)
+            self.persistent_cloud_worker.log_msg.connect(self.log)
+            self.persistent_cloud_worker.start()
+        
         self.log("SYSTEM BOOT: UI Initialized. Awaiting database connection.")
+
+    def on_thumbnail_ready(self, path, qimage):
+        self.pending_thumbnails[path] = qimage
+
+    def apply_pending_thumbnails(self):
+        if not self.pending_thumbnails:
+            return
+            
+        keys_to_process = list(self.pending_thumbnails.keys())
+        for path in keys_to_process:
+            qimage = self.pending_thumbnails.pop(path, None)
+            if qimage is None: continue
+            
+            item = self.thumbnail_map.get(path)
+            if not item:
+                norm_target = os.path.normpath(path)
+                for k, v in self.thumbnail_map.items():
+                    if os.path.normpath(k) == norm_target:
+                        item = v
+                        break
+            
+            if item:
+                try:
+                    if self.inbox_list_widget.row(item) != -1:
+                        pixmap = QPixmap.fromImage(qimage)
+                        item.setIcon(QIcon(pixmap))
+                        if "⏳" in item.text():
+                            clean_name = os.path.basename(path)
+                            item.setText(clean_name)
+                except RuntimeError:
+                    pass
 
     def log(self, message):
         self.log_signal.emit(message)
@@ -526,8 +674,14 @@ class TagManagerTab(QWidget):
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Search existing tags (e.g., 'outdoor') or leave blank for Inbox...")
         self.search_bar.setStyleSheet("padding: 8px; border-radius: 4px; background-color: #252526; color: white; border: 1px solid #3e3e42;")
+        self.search_timer = QTimer(self)
+        self.search_timer.setSingleShot(True)
+        self.search_timer.setInterval(350)
+        self.search_timer.timeout.connect(self.search_library_by_tag)
+        
+        self.search_bar.textChanged.connect(self.search_timer.start)
         self.search_bar.returnPressed.connect(self.search_library_by_tag)
-        self.search_completer = QCompleter()
+        self.search_completer = MultiTagCompleter()
         self.search_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.search_completer.setModel(self.tag_completer_model)
         self.search_bar.setCompleter(self.search_completer)
@@ -556,6 +710,12 @@ class TagManagerTab(QWidget):
 
         self.inbox_list_widget = QListWidget()
         self.inbox_list_widget.setStyleSheet("background-color: #1e1e1e; border: 1px solid #3e3e42; border-radius: 4px;")
+        self.inbox_list_widget.setViewMode(QListWidget.ViewMode.IconMode)
+        self.inbox_list_widget.setIconSize(QSize(150, 150))
+        self.inbox_list_widget.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.inbox_list_widget.setSpacing(10)
+        self.inbox_list_widget.setMovement(QListWidget.Movement.Static)
+        self.inbox_list_widget.setWordWrap(True)
         self.inbox_list_widget.itemClicked.connect(self.on_inbox_item_selected)
         inbox_layout.addWidget(self.inbox_list_widget)
         
@@ -566,8 +726,36 @@ class TagManagerTab(QWidget):
         col2_layout = QVBoxLayout(col2_widget)
         col2_layout.setContentsMargins(5, 0, 5, 0)
         
+        rename_group = QGroupBox("File Rename")
+        rename_layout = QHBoxLayout()
+        self.rename_input = QLineEdit()
+        self.rename_input.setPlaceholderText("File name (without extension)")
+        self.rename_input.setStyleSheet("padding: 5px; border-radius: 4px; background-color: #252526; color: white; border: 1px solid #3e3e42;")
+        
+        self.lbl_rename_error = QLabel("⚠️ Name exists!")
+        self.lbl_rename_error.setStyleSheet("color: #ff5252; font-weight: bold; font-size: 11px;")
+        self.lbl_rename_error.setToolTip("A file with this name already exists in this folder.")
+        self.lbl_rename_error.hide()
+        
+        from PyQt6.QtGui import QRegularExpressionValidator
+        from PyQt6.QtCore import QRegularExpression
+        regex = QRegularExpression(r'[^<>:"/\\|?*]+')
+        self.rename_input.setValidator(QRegularExpressionValidator(regex, self.rename_input))
+        self.rename_input.textChanged.connect(self.mark_current_file_renamed)
+        
+        rename_layout.addWidget(self.rename_input)
+        rename_layout.addWidget(self.lbl_rename_error)
+        rename_group.setLayout(rename_layout)
+        col2_layout.addWidget(rename_group)
+        
         active_tags_group = QGroupBox("Active Tags (Double-click to delete)")
         active_tags_layout = QVBoxLayout()
+        
+        self.active_tags_search = QLineEdit()
+        self.active_tags_search.setPlaceholderText("Filter active tags...")
+        self.active_tags_search.setStyleSheet("padding: 5px; border-radius: 4px; background-color: #252526; color: white; border: 1px solid #3e3e42;")
+        self.active_tags_search.textChanged.connect(self.filter_active_tags)
+        active_tags_layout.addWidget(self.active_tags_search)
         
         self.file_tag_list = QListWidget()
         self.file_tag_list.setStyleSheet("""
@@ -584,7 +772,7 @@ class TagManagerTab(QWidget):
         self.input_add_tag.setPlaceholderText("Add tag manually...")
         self.input_add_tag.setStyleSheet("border-radius: 4px; padding-left: 8px;")
         
-        self.tag_completer = QCompleter()
+        self.tag_completer = MultiTagCompleter()
         self.tag_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.tag_completer.setModel(self.tag_completer_model)
         self.tag_completer.setMaxVisibleItems(10)
@@ -646,7 +834,7 @@ class TagManagerTab(QWidget):
         self.btn_approve_all_cloud.clicked.connect(self.batch_approve_all_cloud)
         self.btn_approve_all_cloud.hide()
         
-        self.btn_save_archive = QPushButton("Archive and Save File")
+        self.btn_save_archive = QPushButton("Save All Pending Changes")
         self.btn_save_archive.setMinimumHeight(40) 
         self.btn_save_archive.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
@@ -663,7 +851,7 @@ class TagManagerTab(QWidget):
         self.splitter.addWidget(col1_widget)
         self.splitter.addWidget(col2_widget)
         self.splitter.addWidget(col3_widget)
-        self.splitter.setSizes([250, 300, 600])
+        self.splitter.setSizes([719, 334, 644])
 
         main_layout.addWidget(self.splitter)
 
@@ -680,8 +868,6 @@ class TagManagerTab(QWidget):
 
 
     def get_db_paths(self):
-        import sys
-        from PyQt6.QtCore import QSettings
         settings = QSettings("MediaNest", "AppConfig")
         db_folder = settings.value("db_folder_path", "", type=str)
         library_db = os.path.join(db_folder, "library.db")
@@ -723,21 +909,22 @@ class TagManagerTab(QWidget):
 
     def add_single_streamed_item(self, file_name, file_path, file_hash):
         """Catches items from the background thread and injects them into the UI instantly."""
-        creator_folder = os.path.basename(os.path.dirname(file_path))
+        empty_pixmap = QPixmap(150, 150)
+        empty_pixmap.fill(Qt.GlobalColor.transparent)
         
-        if file_hash in self.pending_cloud_matches:
-            display_text = f"[{creator_folder}] {file_name}"
-        else:
-            display_text = f"[{creator_folder}] {file_name}"
+        item = QListWidgetItem()
+        item.setToolTip(file_name)
+        item.setIcon(QIcon(empty_pixmap))
         
-        item = QListWidgetItem(display_text)
-        if file_hash in self.pending_cloud_matches:
-            item.setForeground(QColor("#b388ff"))
-            item.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "cloud.svg"))))
-            
         item.setData(Qt.ItemDataRole.UserRole, {"path": file_path, "hash": file_hash})
+        self.thumbnail_map[file_path] = item
         self.inbox_list_widget.addItem(item)
         
+        if any(file_name.lower().endswith(e) for e in ('.mp4', '.mkv', '.avi', '.webm', '.mov')):
+            self.vid_thumb_worker.add_to_queue([file_path])
+        else:
+            self.thumb_worker.add_to_queue([file_path])
+            
         self.inbox_list_widget.scrollToBottom()
 
     def on_import_finished(self, imported, skipped):
@@ -813,6 +1000,10 @@ class TagManagerTab(QWidget):
 
     def refresh_tagless_inbox(self):
         self.inbox_list_widget.clear()
+        self.thumbnail_map.clear()
+        self.thumb_worker.clear_queue()
+        self.vid_thumb_worker.clear_queue()
+        
         library_db, _ = self.get_db_paths()
         if not os.path.exists(library_db): return
 
@@ -836,6 +1027,9 @@ class TagManagerTab(QWidget):
             invalid_hashes = []
             valid_items_count = 0
             
+            files_for_img_thumbs = []
+            files_for_vid_thumbs = []
+
             for file_name, file_path, file_hash in rows:
                 
                 if not file_path or not os.path.exists(file_path):
@@ -843,20 +1037,28 @@ class TagManagerTab(QWidget):
                     continue
                 
                 valid_items_count += 1
-                creator_folder = os.path.basename(os.path.dirname(file_path))
                 
-                if file_hash in self.pending_cloud_matches:
-                    display_text = f"[{creator_folder}] {file_name}"
-                else:
-                    display_text = f"[{creator_folder}] {file_name}"
+                empty_pixmap = QPixmap(150, 150)
+                empty_pixmap.fill(Qt.GlobalColor.transparent)
                 
-                item = QListWidgetItem(display_text)
-                if file_hash in self.pending_cloud_matches:
-                    item.setForeground(QColor("#b388ff"))
-                    item.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "cloud.svg"))))
-                    
+                item = QListWidgetItem()
+                item.setToolTip(file_name)
+                item.setIcon(QIcon(empty_pixmap))
+                
+                if file_hash in self.pending_tag_changes:
+                    item.setBackground(QColor(45, 125, 70, 100))
+                
                 item.setData(Qt.ItemDataRole.UserRole, {"path": file_path, "hash": file_hash})
+                self.thumbnail_map[file_path] = item
                 self.inbox_list_widget.addItem(item)
+                
+                if any(file_name.lower().endswith(e) for e in ('.mp4', '.mkv', '.avi', '.webm', '.mov')):
+                    files_for_vid_thumbs.append(file_path)
+                else:
+                    files_for_img_thumbs.append(file_path)
+                    
+            if files_for_img_thumbs: self.thumb_worker.add_to_queue(files_for_img_thumbs)
+            if files_for_vid_thumbs: self.vid_thumb_worker.add_to_queue(files_for_vid_thumbs)
                 
             if invalid_hashes:
                 for h in invalid_hashes:
@@ -875,6 +1077,9 @@ class TagManagerTab(QWidget):
         search_text = self.search_bar.text().strip().lower()
         self.inbox_list_widget.clear()
         self.file_tag_list.clear()
+        self.thumbnail_map.clear()
+        self.thumb_worker.clear_queue()
+        self.vid_thumb_worker.clear_queue()
         
         library_db, _ = self.get_db_paths()
         if not os.path.exists(library_db): return
@@ -882,26 +1087,60 @@ class TagManagerTab(QWidget):
         conn = sqlite3.connect(library_db)
         cursor = conn.cursor()
 
-        if not search_text:
+        tags_to_search = [t.strip() for t in search_text.split(',') if t.strip()]
+        
+        if not tags_to_search:
             self.inbox_group.setTitle("Tag Management Index (Inbox Queue)")
             self.refresh_tagless_inbox()
             conn.close()
             return
         
         self.inbox_group.setTitle(f"Tag Management Index (Results for: {search_text})")
-        cursor.execute("""
-            SELECT i.hash, i.file_path, i.file_name 
-            FROM Images i
-            JOIN ImageTags it ON i.hash = it.hash
-            JOIN Tags t ON it.tag_id = t.tag_id
-            WHERE t.tag_name LIKE ?
-        """, (f"%{search_text}%",))
+        
+        query = "SELECT hash, file_path, file_name FROM Images WHERE "
+        conditions = []
+        params = []
+        for tag in tags_to_search:
+            conditions.append("""
+                hash IN (
+                    SELECT it.hash 
+                    FROM ImageTags it 
+                    JOIN Tags t ON it.tag_id = t.tag_id 
+                    WHERE t.tag_name LIKE ?
+                )
+            """)
+            params.append(f"%{tag}%")
+            
+        query += " AND ".join(conditions)
+        cursor.execute(query, tuple(params))
+
+        files_for_img_thumbs = []
+        files_for_vid_thumbs = []
 
         for row in cursor.fetchall():
             file_hash, file_path, file_name = row
-            item = QListWidgetItem(file_name)
+            
+            empty_pixmap = QPixmap(150, 150)
+            empty_pixmap.fill(Qt.GlobalColor.transparent)
+            
+            item = QListWidgetItem()
+            item.setToolTip(file_name)
+            item.setIcon(QIcon(empty_pixmap))
+            
+            if file_hash in self.pending_tag_changes:
+                item.setBackground(QColor(45, 125, 70, 100))
+                
             item.setData(Qt.ItemDataRole.UserRole, {"path": file_path, "hash": file_hash})
+            self.thumbnail_map[file_path] = item
             self.inbox_list_widget.addItem(item)
+            
+            if any(file_name.lower().endswith(e) for e in ('.mp4', '.mkv', '.avi', '.webm', '.mov')):
+                files_for_vid_thumbs.append(file_path)
+            else:
+                files_for_img_thumbs.append(file_path)
+                
+        if files_for_img_thumbs: self.thumb_worker.add_to_queue(files_for_img_thumbs)
+        if files_for_vid_thumbs: self.vid_thumb_worker.add_to_queue(files_for_vid_thumbs)
 
         conn.close()
 
@@ -912,62 +1151,127 @@ class TagManagerTab(QWidget):
         self.current_file_hash = file_hash
         self.file_tag_list.clear()
         self.input_add_tag.clear()
+        
+        self.rename_input.blockSignals(True)
+        if file_hash in self.pending_renames:
+            current_name = self.pending_renames[file_hash]
+            name_no_ext, _ = os.path.splitext(current_name)
+            self.rename_input.setText(name_no_ext)
+        else:
+            base_name = os.path.basename(file_path)
+            name_no_ext, _ = os.path.splitext(base_name)
+            self.rename_input.setText(name_no_ext)
+        self.rename_input.blockSignals(False)
 
-        library_db, _ = self.get_db_paths()
-        if os.path.exists(library_db):
-            conn = sqlite3.connect(library_db)
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1 FROM tagless WHERE hash = ?", (file_hash,))
-            is_in_tagless = cursor.fetchone() is not None
-            cursor.execute("""
-                SELECT t.tag_id, t.tag_name 
-                FROM Tags t
-                JOIN ImageTags it ON t.tag_id = it.tag_id
-                WHERE it.hash = ?
-            """, (file_hash,))
-            
-            for row in cursor.fetchall():
-                tag_id, tag_name = row
+        if file_hash in self.pending_tag_changes:
+            for tag_name in self.pending_tag_changes[file_hash]:
                 item = QListWidgetItem(tag_name)
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 item.setCheckState(Qt.CheckState.Unchecked)
                 item.setForeground(QColor("#ff6b6b"))
-                item.setData(Qt.ItemDataRole.UserRole, {"tag_id": tag_id, "tag_name": tag_name, "is_saved": True})
-                self.file_tag_list.addItem(item)
-            conn.close()
-
-        if file_hash in self.pending_cloud_matches:
-            for tag in self.pending_cloud_matches[file_hash]:
-                item = QListWidgetItem(f"{tag}")
-                item.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "cloud.svg"))))
-                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable) 
-                item.setCheckState(Qt.CheckState.Unchecked)
-                item.setForeground(QColor("#b388ff"))
+                item.setData(Qt.ItemDataRole.UserRole, {"tag_id": None, "tag_name": tag_name, "is_saved": False})
                 self.file_tag_list.addItem(item)
                 
-        if not is_in_tagless:
-            self.btn_save_archive.setEnabled(False)
-            self.btn_save_archive.setText("Already Archived")
-            self.btn_save_archive.setStyleSheet("QPushButton { background-color: #2d2d2d; color: #666666; font-weight: bold; font-size: 14px; border-radius: 4px; border: 1px solid #3e3e42; }")
-            self.btn_approve_all_cloud.hide()
-            
-        elif file_hash in self.pending_cloud_matches:
             self.btn_save_archive.setEnabled(True)
-            self.btn_save_archive.setText("Approve Selected")
-            self.btn_save_archive.setStyleSheet("QPushButton { background-color: #8957e5; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #9a68f6; }")
-            self.btn_approve_all_cloud.show()
-            
-        else:
-            self.btn_save_archive.setEnabled(True)
-            self.btn_save_archive.setText("Archive and Save File")
+            self.btn_save_archive.setText("Save All Pending Changes")
             self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
             self.btn_approve_all_cloud.hide()
+                
+        else:
+            library_db, _ = self.get_db_paths()
+            if os.path.exists(library_db):
+                conn = sqlite3.connect(library_db)
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1 FROM tagless WHERE hash = ?", (file_hash,))
+                is_in_tagless = cursor.fetchone() is not None
+                cursor.execute("""
+                    SELECT t.tag_id, t.tag_name 
+                    FROM Tags t
+                    JOIN ImageTags it ON t.tag_id = it.tag_id
+                    WHERE it.hash = ?
+                """, (file_hash,))
+                
+                for row in cursor.fetchall():
+                    tag_id, tag_name = row
+                    item = QListWidgetItem(tag_name)
+                    item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                    item.setCheckState(Qt.CheckState.Unchecked)
+                    item.setForeground(QColor("#ff6b6b"))
+                    item.setData(Qt.ItemDataRole.UserRole, {"tag_id": tag_id, "tag_name": tag_name, "is_saved": True})
+                    self.file_tag_list.addItem(item)
+                conn.close()
+
+            if file_hash in self.pending_cloud_matches:
+                for tag in self.pending_cloud_matches[file_hash]:
+                    item = QListWidgetItem(f"{tag}")
+                    item.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "cloud.svg"))))
+                    item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable) 
+                    item.setCheckState(Qt.CheckState.Unchecked)
+                    item.setForeground(QColor("#b388ff"))
+                    self.file_tag_list.addItem(item)
+                    
+            if not is_in_tagless:
+                self.btn_save_archive.setEnabled(False)
+                self.btn_save_archive.setText("Already Archived")
+                self.btn_save_archive.setStyleSheet("QPushButton { background-color: #2d2d2d; color: #666666; font-weight: bold; font-size: 14px; border-radius: 4px; border: 1px solid #3e3e42; }")
+                self.btn_approve_all_cloud.hide()
+                
+            elif file_hash in self.pending_cloud_matches:
+                self.btn_save_archive.setEnabled(True)
+                self.btn_save_archive.setText("Approve Selected")
+                self.btn_save_archive.setStyleSheet("QPushButton { background-color: #8957e5; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #9a68f6; }")
+                self.btn_approve_all_cloud.show()
+                
+            else:
+                self.btn_save_archive.setEnabled(True)
+                self.btn_save_archive.setText("Save All Pending Changes")
+                self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
+                self.btn_approve_all_cloud.hide()
+
 
         self.lbl_tag_preview.set_image(file_path)
 
     def on_inbox_item_selected(self, item):
         data = item.data(Qt.ItemDataRole.UserRole)
         if data: self.load_file_into_tagger(data["path"], data["hash"])
+
+    def mark_current_file_renamed(self, new_text):
+        if not self.current_file_hash or not self.current_selected_file: return
+        
+        base_name = os.path.basename(self.current_selected_file)
+        name_no_ext, ext = os.path.splitext(base_name)
+        
+        self.lbl_rename_error.hide()
+        
+        if new_text != name_no_ext and new_text.strip() != "":
+            target_name = new_text.strip() + ext
+            target_path = os.path.join(os.path.dirname(self.current_selected_file), target_name)
+            
+            if os.path.exists(target_path) and target_path != self.current_selected_file:
+                self.lbl_rename_error.show()
+                self.pending_renames.pop(self.current_file_hash, None)
+            else:
+                self.pending_renames[self.current_file_hash] = target_name
+        else:
+            self.pending_renames.pop(self.current_file_hash, None)
+            
+        self.wake_up_save_button()
+
+    def mark_current_file_changed(self):
+        if not self.current_file_hash: return
+        
+        current_tags = []
+        for i in range(self.file_tag_list.count()):
+            tag_text = self.file_tag_list.item(i).text().replace("☁️ ", "").replace("☁️", "").strip()
+            if tag_text: current_tags.append(tag_text)
+            
+        self.pending_tag_changes[self.current_file_hash] = current_tags
+        
+        if self.current_selected_file in self.thumbnail_map:
+            item = self.thumbnail_map[self.current_selected_file]
+            item.setBackground(QColor(45, 125, 70, 100)) # subtle green background
+
+        self.wake_up_save_button()
 
     def add_tag_to_current_list(self):
         tag_value = self.input_add_tag.text().strip().lower().replace(" ", "_")
@@ -984,10 +1288,16 @@ class TagManagerTab(QWidget):
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable) 
             item.setCheckState(Qt.CheckState.Unchecked)
             self.file_tag_list.addItem(item)
-            
-            self.wake_up_save_button()
+            self.mark_current_file_changed()
             
         self.input_add_tag.clear()
+
+    def filter_active_tags(self, text):
+        search_text = text.lower()
+        for i in range(self.file_tag_list.count()):
+            item = self.file_tag_list.item(i)
+            tag_name = item.text().lower()
+            item.setHidden(search_text not in tag_name)
 
     def delete_checked_tags(self):
         """Finds all checked tags and deletes them from the UI and Database."""
@@ -1003,29 +1313,17 @@ class TagManagerTab(QWidget):
             return
 
         reply = QMessageBox.question(self, "Delete Tags", 
-                                     f"Are you sure you want to delete {len(items_to_delete)} selected tags?",
+                                     f"Are you sure you want to remove {len(items_to_delete)} selected tags from this image?",
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
 
         if reply == QMessageBox.StandardButton.Yes:
-            library_db, _ = self.get_db_paths()
-            conn = sqlite3.connect(library_db)
-            cursor = conn.cursor()
-            
             for item in items_to_delete:
-                data = item.data(Qt.ItemDataRole.UserRole)
-                
-                if isinstance(data, dict) and data.get("is_saved"):
-                    tag_id = data["tag_id"]
-                    cursor.execute("DELETE FROM ImageTags WHERE hash = ? AND tag_id = ?", (self.current_file_hash, tag_id))
-                
                 self.file_tag_list.takeItem(self.file_tag_list.row(item))
                 
-            conn.commit()
-            conn.close()
-            self.log(f"Bulk deleted {len(items_to_delete)} tags.")
+            self.mark_current_file_changed()
+            self.log(f"Removed {len(items_to_delete)} tags (Pending Save).")
 
     def run_auto_tagger(self):
-        from Src.Logic.visual_sorter import VisualSorter 
         if not self.current_selected_file: return
 
         db_folder = self.settings_dialog.db_path_input.text().strip()
@@ -1162,32 +1460,7 @@ class TagManagerTab(QWidget):
             self.log(f"DB CRITICAL ERROR: {e}")
 
 
-    def push_to_supabase(self, hash_val, tags_list):
-        import uuid
-        from PyQt6.QtCore import QSettings
 
-        self.log(f"CLOUD SYNC: Transmitting metadata to Supabase...")
-        
-        url = "https://jhzshjwkeljwuovfyasa.supabase.co/rest/v1/unapproved_queue"
-        key = "sb_publishable_U38Za9kpw-oLzHFRMC5wyA_VuI6OElh"
-        
-        settings = QSettings("MediaNest", "CloudConfig")
-        user_token = settings.value("anon_user_token", "", type=str)
-        if not user_token:
-            user_token = str(uuid.uuid4())
-            settings.setValue("anon_user_token", user_token)
-
-        payload = {"hash": hash_val, "suggested_tags": ", ".join(tags_list), "submitted_by_token": user_token}
-        headers = {"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json", "Prefer": "return=minimal"}
-        
-        try: 
-            response = requests.post(url, json=payload, headers=headers, timeout=5)
-            if response.status_code in [200, 201, 204]:
-                self.log(f"CLOUD SYNC [200 OK]: Successfully contributed {len(tags_list)} tags.")
-            else:
-                self.log(f"CLOUD SYNC [ERR]: Remote server rejected payload. Code {response.status_code}")
-        except Exception as e: 
-            self.log(f"CLOUD SYNC [ERR]: Handshake failed. Network may be unreachable.")
 
     def wake_up_save_button(self):
         """Wakes up the save button if a user adds new tags to an already archived file."""
@@ -1197,64 +1470,145 @@ class TagManagerTab(QWidget):
             self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
             
     def graduate_file_to_archive(self):
-        if not self.current_selected_file or not self.current_file_hash: return
+        if self.current_file_hash:
+            self.mark_current_file_changed()
+            
+        all_hashes = set(self.pending_tag_changes.keys()) | set(self.pending_renames.keys())
+        if not all_hashes:
+            QMessageBox.information(self, "No Changes", "There are no pending tag or name changes to save.")
+            return
 
         library_db, _ = self.get_db_paths()
         if not os.path.exists(library_db): return
 
-        final_tags = []
-        for i in range(self.file_tag_list.count()):
-            raw_tag = self.file_tag_list.item(i).text().strip().lower()
-            clean_tag = raw_tag.replace("☁️ ", "").replace("☁️", "")
-            if clean_tag:
-                final_tags.append(clean_tag)
+        reply = QMessageBox.question(self, "Save All Changes", f"You are about to permanently save changes for {len(all_hashes)} files. Proceed?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.No: return
 
-        if not final_tags:
-            reply = QMessageBox.question(self, "Metadata Verification", "No tags have been set. Proceed to move this into the main table as untagged archive data?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            if reply == QMessageBox.StandardButton.No: return
-
-        self.log(f"Archiving '{os.path.basename(self.current_selected_file)}' with {len(final_tags)} tags.")
+        self.log(f"Batch archiving/renaming {len(all_hashes)} files...")
 
         try:
             conn = sqlite3.connect(library_db)
             cursor = conn.cursor()
-            file_name = os.path.basename(self.current_selected_file)
             
-            cursor.execute("SELECT phash FROM tagless WHERE hash = ?", (self.current_file_hash,))
-            row = cursor.fetchone()
-            phash_value = row[0] if row else None
+            upload_queue = []
 
-            cursor.execute("INSERT OR IGNORE INTO Images (hash, file_path, file_name, phash) VALUES (?, ?, ?, ?)", (self.current_file_hash, self.current_selected_file, file_name, phash_value))
+            for file_hash in list(all_hashes):
+                file_path = None
+                file_name = None
+                tags = self.pending_tag_changes.get(file_hash)
+                
+                if file_hash == self.current_file_hash:
+                    file_path = self.current_selected_file
+                    file_name = os.path.basename(file_path) if file_path else None
+                
+                if not file_path:
+                    for path, item in self.thumbnail_map.items():
+                        data = item.data(Qt.ItemDataRole.UserRole)
+                        if data and data.get("hash") == file_hash:
+                            file_path = path
+                            file_name = os.path.basename(path)
+                            break
+                            
+                if not file_path:
+                    cursor.execute("SELECT file_path, file_name FROM tagless WHERE hash = ?", (file_hash,))
+                    row = cursor.fetchone()
+                    if row:
+                        file_path, file_name = row
+                    else:
+                        cursor.execute("SELECT file_path, file_name FROM Images WHERE hash = ?", (file_hash,))
+                        row = cursor.fetchone()
+                        if row:
+                            file_path, file_name = row
+                        else:
+                            continue
 
-            for tag in final_tags:
-                if not tag: continue
-                cursor.execute("INSERT OR IGNORE INTO Tags (tag_name) VALUES (?)", (tag,))
-                cursor.execute("SELECT tag_id FROM Tags WHERE tag_name = ?", (tag,))
-                tag_id = cursor.fetchone()[0]
-                cursor.execute("INSERT OR IGNORE INTO ImageTags (hash, tag_id) VALUES (?, ?)", (self.current_file_hash, tag_id))
+                if file_hash in self.pending_renames:
+                    new_name = self.pending_renames[file_hash]
+                    new_path = os.path.join(os.path.dirname(file_path), new_name)
+                    if new_path != file_path:
+                        try:
+                            os.rename(file_path, new_path)
+                            cursor.execute("UPDATE tagless SET file_path = ?, file_name = ? WHERE hash = ?", (new_path, new_name, file_hash))
+                            cursor.execute("UPDATE Images SET file_path = ?, file_name = ? WHERE hash = ?", (new_path, new_name, file_hash))
+                            
+                            if file_hash == self.current_file_hash:
+                                self.current_selected_file = new_path
+                            
+                            if file_path in self.thumbnail_map:
+                                item = self.thumbnail_map.pop(file_path)
+                                data = item.data(Qt.ItemDataRole.UserRole)
+                                if data:
+                                    data["path"] = new_path
+                                    item.setData(Qt.ItemDataRole.UserRole, data)
+                                self.thumbnail_map[new_path] = item
+                                
+                            file_path = new_path
+                            file_name = new_name
+                        except OSError as e:
+                            self.log(f"Failed to rename {file_name} to {new_name}: {e}")
 
-            cursor.execute("DELETE FROM tagless WHERE hash = ?", (self.current_file_hash,))
+                if tags is None:
+                    continue
+
+                cursor.execute("SELECT phash FROM tagless WHERE hash = ?", (file_hash,))
+                row = cursor.fetchone()
+                phash_value = row[0] if row else None
+
+                cursor.execute("INSERT OR IGNORE INTO Images (hash, file_path, file_name, phash) VALUES (?, ?, ?, ?)", (file_hash, file_path, file_name, phash_value))
+                
+                cursor.execute("DELETE FROM ImageTags WHERE hash = ?", (file_hash,))
+
+                for tag in tags:
+                    if not tag: continue
+                    cursor.execute("INSERT OR IGNORE INTO Tags (tag_name) VALUES (?)", (tag,))
+                    cursor.execute("SELECT tag_id FROM Tags WHERE tag_name = ?", (tag,))
+                    tag_id = cursor.fetchone()[0]
+                    cursor.execute("INSERT OR IGNORE INTO ImageTags (hash, tag_id) VALUES (?, ?)", (file_hash, tag_id))
+
+                cursor.execute("DELETE FROM tagless WHERE hash = ?", (file_hash,))
+                
+                if tags:
+                    upload_queue.append((file_hash, tags))
+                
+                if file_hash in self.pending_cloud_matches:
+                    del self.pending_cloud_matches[file_hash]
+
             conn.commit()
             conn.close()
 
-            if self.cb_help_others.isChecked() and final_tags:
-                threading.Thread(target=self.push_to_supabase, args=(self.current_file_hash, final_tags), daemon=True).start()
-            else:
-                self.log("CLOUD SYNC: Skipped. (User opted-out or payload empty).")
+            if self.cb_help_others.isChecked() and upload_queue:
+                db_folder = self.settings_dialog.db_path_input.text().strip()
+                if os.path.exists(db_folder):
+                    queue_db = os.path.join(db_folder, "cloud_queue.db")
+                    try:
+                        q_conn = sqlite3.connect(queue_db)
+                        q_cursor = q_conn.cursor()
+                        for file_hash, tags in upload_queue:
+                            q_cursor.execute("INSERT INTO upload_queue (hash, tags) VALUES (?, ?)", (file_hash, ", ".join(tags)))
+                        q_conn.commit()
+                        q_conn.close()
+                    except Exception as e:
+                        self.log(f"CLOUD QUEUE INSERT ERR: {e}")
             
-            if self.current_file_hash in self.pending_cloud_matches:
-                del self.pending_cloud_matches[self.current_file_hash]
-                
+            self.pending_tag_changes.clear()
+            self.pending_renames.clear()
             self.lbl_tag_preview.clear_image("Select a file from the Inbox to work on")
             self.file_tag_list.clear()
             self.current_selected_file = None
             self.current_file_hash = None
             
-            self.btn_save_archive.setText("Archive and Save File")
+            self.btn_save_archive.setText("Save All Pending Changes")
             self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
             self.btn_approve_all_cloud.hide()
             
             self.refresh_global_tags()
-            self.refresh_tagless_inbox()
+            
+            search_text = self.search_bar.text().strip()
+            if search_text:
+                self.search_library_by_tag()
+            else:
+                self.refresh_tagless_inbox()
+            self.log("Batch Archiving completed successfully.")
+            
         except Exception as e:
             self.log(f"DB CRITICAL ROLLBACK: Graduation failed -> {e}")

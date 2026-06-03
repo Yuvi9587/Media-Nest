@@ -11,11 +11,12 @@ class DeduplicationWorker(QThread):
     duplicates_found = pyqtSignal(list)     
     finished_signal = pyqtSignal()
 
-    def __init__(self, db_path, threshold):
+    def __init__(self, db_path, threshold, target_tag=None):
         super().__init__()
         self.db_path = db_path
         self.is_running = True
         self.threshold = threshold
+        self.target_tag = target_tag
 
     def run(self):
         try:
@@ -35,7 +36,18 @@ class DeduplicationWorker(QThread):
             ignored_pairs = {tuple(sorted((h1, h2))) for h1, h2 in cursor.fetchall()}
 
             self.status_signal.emit("Fetching database records...")
-            cursor.execute("SELECT hash, file_path, phash FROM Images")
+            
+            if self.target_tag:
+                cursor.execute("""
+                    SELECT DISTINCT i.hash, i.file_path, i.phash 
+                    FROM Images i
+                    JOIN ImageTags it ON i.hash = it.hash
+                    JOIN Tags t ON it.tag_id = t.tag_id
+                    WHERE t.tag_name LIKE ?
+                """, (f"%{self.target_tag}%",))
+            else:
+                cursor.execute("SELECT hash, file_path, phash FROM Images")
+                
             rows = cursor.fetchall()
             
             valid_images = []

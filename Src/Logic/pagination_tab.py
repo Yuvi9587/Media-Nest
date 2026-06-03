@@ -6,6 +6,10 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QStyledItemDelegate)
 from PyQt6.QtCore import Qt, QSize, QTimer
 from PyQt6.QtGui import QIcon, QPixmap, QImageReader, QPainter, QColor
+import re
+
+def natural_key(text):
+    return [int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", text)]
 
 class PageNumberDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index):
@@ -233,7 +237,7 @@ class PaginationTab(QWidget):
         folder = QFileDialog.getExistingDirectory(self, "Select Folder to Import")
         if folder:
             try:
-                entries = sorted(os.scandir(folder), key=lambda e: e.name.lower())
+                entries = sorted(os.scandir(folder), key=lambda e: natural_key(e.name))
                 valid_exts = ('.jpg', '.jpeg', '.png', '.webp', '.bmp')
                 
                 for entry in entries:

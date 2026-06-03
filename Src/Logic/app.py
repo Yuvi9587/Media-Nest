@@ -1,25 +1,32 @@
 import sys
 import os
+import io
 import time
 import json
 import sqlite3
 import hashlib
+from PIL import Image
 from PyQt6.QtWidgets import (QMainWindow, QFileDialog, QApplication, QMenu, 
                              QStyledItemDelegate, QStyle, QListWidgetItem,
                              QCompleter, QMessageBox, QVBoxLayout, QWidget, QListWidget,
-                             QLineEdit)
+                             QLineEdit, QDialog)
 from PyQt6.QtGui import (QPixmap, QIcon, QAction, QStandardItemModel, 
                          QStandardItem, QColor, QPainter, QImageReader, QImage, QMovie,
-                         QKeySequence, QShortcut)
+                         QKeySequence, QShortcut, QIcon)
 from PyQt6.QtCore import (QDir, QUrl, Qt, QRect, QEvent, pyqtSignal, QTimer, 
-                          QThread, QObject, QSize, QSortFilterProxyModel, QBuffer, QByteArray)
+                          QThread, QObject, QSize, QSortFilterProxyModel, QBuffer, QByteArray,
+                          QSettings, QPoint)
 
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput, QVideoSink
+from collections import defaultdict
 
 from Src.Ui.interface import MainWindowUI
 from Src.Ui.theme import VSCODE_DARK_THEME
 from Src.Logic.file_ops import FileContextMenu
 from Src.Logic.paths import resource_path
+from Src.Dialogs.settings_dialog import SettingsDialog
+from Src.Ui.theme import VSCODE_DARK_THEME
+from Src.Dialogs.setup_dialog import FirstTimeSetupDialog
 
 class VideoThumbnailer(QObject):
     thumbnail_ready = pyqtSignal(str, QImage)
@@ -37,6 +44,7 @@ class VideoThumbnailer(QObject):
         self.sink = QVideoSink()
         self.player.setVideoSink(self.sink)
         self.sink.videoFrameChanged.connect(self.on_frame_changed)
+        self.player.mediaStatusChanged.connect(self.on_media_status_changed)
         
         self.current_path = None
         
@@ -65,7 +73,7 @@ class VideoThumbnailer(QObject):
         
         self.is_processing = True
         self.current_path = self.queue.pop(0)
-        
+                
         try:
             if not os.path.exists(self.current_path) or os.path.getsize(self.current_path) < 100:
                 self.current_path = None
@@ -77,9 +85,27 @@ class VideoThumbnailer(QObject):
             self.is_processing = False
             QTimer.singleShot(10, self.process_next)
             return
+            
+        appdata_path = os.environ.get('APPDATA')
+        if not appdata_path:
+            appdata_path = os.path.expanduser('~')
+        cache_dir = os.path.join(appdata_path, 'MediaNest', 'ThumbCache')
+        os.makedirs(cache_dir, exist_ok=True)
+        
+        path_hash = hashlib.md5(self.current_path.encode('utf-8')).hexdigest()
+        cache_file_path = os.path.join(cache_dir, f"{path_hash}.jpg")
+
+        if os.path.exists(cache_file_path):
+            cached_image = QImage(cache_file_path)
+            if not cached_image.isNull():
+                self.thumbnail_ready.emit(self.current_path, cached_image)
+                self.current_path = None
+                self.is_processing = False
+                QTimer.singleShot(10, self.process_next)
+                return
         
         self.player.setSource(QUrl.fromLocalFile(self.current_path))
-        QTimer.singleShot(30, self.player.play)
+        self.timeout_timer.start(3000)
         self.timeout_timer.start(3000)
 
     def pause(self):
@@ -96,6 +122,16 @@ class VideoThumbnailer(QObject):
         self.is_paused = False
         if not self.is_processing and self.queue:
             self.process_next()
+
+    def on_media_status_changed(self, status):
+        if status == QMediaPlayer.MediaStatus.LoadedMedia:
+            if not self.is_processing or not self.current_path:
+                return
+            duration = self.player.duration()
+            if duration > 0:
+                seek_pos = min(15000, int(duration * 0.15))
+                self.player.setPosition(seek_pos)
+            self.player.play()
 
     def on_frame_changed(self, frame):
         if not self.is_processing or not self.current_path:
@@ -131,6 +167,16 @@ class VideoThumbnailer(QObject):
         painter.setFont(font)
         painter.drawText(QRect(10, 10, 30, 30), Qt.AlignmentFlag.AlignCenter, "▶")
         painter.end()
+                
+        appdata_path = os.environ.get('APPDATA')
+        if not appdata_path:
+            appdata_path = os.path.expanduser('~')
+        cache_dir = os.path.join(appdata_path, 'MediaNest', 'ThumbCache')
+        os.makedirs(cache_dir, exist_ok=True)
+        
+        path_hash = hashlib.md5(path_to_emit.encode('utf-8')).hexdigest()
+        cache_file_path = os.path.join(cache_dir, f"{path_hash}.jpg")
+        final_image.save(cache_file_path, "JPG", 85)
         
         self.thumbnail_ready.emit(path_to_emit, final_image)
         QTimer.singleShot(10, self.process_next)
@@ -220,8 +266,6 @@ class SingleThumbnailThread(QThread):
                     continue
 
             try:
-                from PIL import Image
-                import io
                 
                 
                 loaded_image = QImage()
@@ -424,7 +468,6 @@ class DatabaseSearchWorker(QThread):
             cursor.execute(query, params)
             results = cursor.fetchall()
 
-            from collections import defaultdict
             folders_map = defaultdict(list)
             valid_results = []
 
@@ -530,6 +573,56 @@ class DatabaseSearchWorker(QThread):
     def stop(self):
         self.is_running = False
 
+class TagFetchWorker(QThread):
+    tags_fetched = pyqtSignal(list)
+    
+    def __init__(self, db_path, file_path):
+        super().__init__()
+        self.db_path = db_path
+        self.file_path = file_path
+        self.is_running = True
+
+    def run(self):
+        try:
+            
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            tags = []
+            
+            if not self.file_path.startswith("custom_manga:"):
+                query = """
+                    SELECT Tags.tag_name 
+                    FROM Tags
+                    JOIN ImageTags ON Tags.tag_id = ImageTags.tag_id
+                    JOIN Images ON ImageTags.hash = Images.hash
+                    WHERE Images.file_path = ?
+                """
+                cursor.execute(query, (self.file_path,))
+                tags = [r[0] for r in cursor.fetchall()]
+                
+                if not tags and os.path.isdir(self.file_path):
+                    manga_query = """
+                        SELECT Tags.tag_name
+                        FROM Tags
+                        JOIN MangaTags ON Tags.tag_id = MangaTags.tag_id
+                        JOIN MangaGalleries ON MangaGalleries.gallery_id = MangaTags.gallery_id
+                        WHERE MangaGalleries.folder_path = ?
+                    """
+                    cursor.execute(manga_query, (self.file_path,))
+                    tags = [r[0] for r in cursor.fetchall()]
+            
+            if self.is_running:
+                self.tags_fetched.emit(tags)
+                
+            conn.close()
+        except Exception:
+            if self.is_running:
+                self.tags_fetched.emit([])
+
+    def stop(self):
+        self.is_running = False
+
 class SmartTreeFilter(QSortFilterProxyModel):
     def __init__(self):
         super().__init__()
@@ -594,7 +687,6 @@ class MultiTagCompleter(QCompleter):
         search_bar = self.widget()
         
         if popup and search_bar:
-            from PyQt6.QtCore import QPoint
             
             global_pos = search_bar.mapToGlobal(QPoint(0, search_bar.height()))
             
@@ -743,7 +835,6 @@ class FloatingViewerWindow(QWidget):
         self.setWindowTitle("Media Nest - Detached Viewer")
         self.setMinimumSize(800, 600)
         
-        from Src.Ui.theme import VSCODE_DARK_THEME
         self.setStyleSheet(VSCODE_DARK_THEME)
 
         self.layout = QVBoxLayout(self)
@@ -782,7 +873,6 @@ class MediaExplorerApp(QMainWindow):
             
         self.setStyleSheet(theme)
 
-        from Src.Logic.paths import resource_path
         self.asset_dir = resource_path("assets")
         self.get_icon = lambda name: QIcon(
             os.path.join(self.asset_dir, "Svg", f"{name}.svg")
@@ -838,6 +928,9 @@ class MediaExplorerApp(QMainWindow):
         self.ui.tree_view.clicked.connect(self.on_tree_item_clicked)
         
         self.ui.gallery_section.list_widget.currentItemChanged.connect(self.on_gallery_item_changed)
+        self.ui.btn_add_tag_main.clicked.connect(self.add_main_tag)
+        self.ui.input_new_tag.returnPressed.connect(self.add_main_tag)
+        self.ui.btn_delete_tag_main.clicked.connect(self.delete_main_tag)
         if hasattr(self.ui.gallery_section, 'filter_combo'):
             self.ui.gallery_section.filter_combo.currentTextChanged.connect(self.on_filter_changed)
         if hasattr(self.ui.gallery_section, 'name_filter_input'):
@@ -859,10 +952,8 @@ class MediaExplorerApp(QMainWindow):
         self.current_search_offset = 0
         self.current_search_id = 0
 
-        import json
         perf_mode = "balanced"
         
-        import sys
         if getattr(sys, 'frozen', False):
             base_dir = os.path.dirname(sys.executable)
         else:
@@ -913,6 +1004,9 @@ class MediaExplorerApp(QMainWindow):
         """Fires exactly when the user clicks the 'X' to close the app."""
         if hasattr(self, 'media_player'):
             self.media_player.stop()
+            
+        if hasattr(self, 'settings_dialog'):
+            self.settings_dialog.close()
             
         if hasattr(self, 'thumb_worker'):
             self.thumb_worker.stop()
@@ -997,10 +1091,7 @@ class MediaExplorerApp(QMainWindow):
             self.original_sidebar_width = self.ui.sidebar_widget.maximumWidth()
             
         self.ui.sidebar_widget.setMaximumWidth(16777215) 
-        self.centralWidget().layout().removeWidget(self.ui.sidebar_widget)
-        self.ui.sidebar_widget.setParent(self.ui.vertical_splitter)
-        self.ui.vertical_splitter.insertWidget(0, self.ui.sidebar_widget)
-        self.ui.vertical_splitter.setSizes([400, 400])
+        self.ui.horizontal_splitter.setSizes([400, 800])
         
         self.previous_gallery_mode = self.ui.gallery_section.current_mode
         if hasattr(self.ui.gallery_section, 'set_size_mode'):
@@ -1010,13 +1101,12 @@ class MediaExplorerApp(QMainWindow):
         """Pulls the viewer back into the main app and restores the UI layout."""
         if self.floating_viewer:
             
-            self.ui.horizontal_splitter.insertWidget(0, self.ui.sidebar_widget)
-            
             if hasattr(self, 'original_sidebar_width'):
                 self.ui.sidebar_widget.setMaximumWidth(self.original_sidebar_width)
             
             self.ui.vertical_splitter.insertWidget(0, self.ui.viewer_widget)
             self.ui.vertical_splitter.setSizes([600, 200])
+            self.ui.horizontal_splitter.setSizes([280, 920])
             
             if hasattr(self, 'previous_gallery_mode') and hasattr(self.ui.gallery_section, 'set_size_mode'):
                 self.ui.gallery_section.set_size_mode(self.previous_gallery_mode)
@@ -1140,9 +1230,6 @@ class MediaExplorerApp(QMainWindow):
 
     def open_settings_dialog(self):
         """Opens the Settings dialog and handles database reconnection if it changes."""
-        from Src.Dialogs.settings_dialog import SettingsDialog
-        import os
-        import json
         
         appdata_path = os.environ.get('APPDATA', os.path.expanduser('~'))
         config_path = os.path.join(appdata_path, 'MediaNest', 'config.json')
@@ -1158,6 +1245,9 @@ class MediaExplorerApp(QMainWindow):
                         pass
                 
                 self.connect_to_database(dialog.new_db_path)
+            
+            if hasattr(dialog, 'current_perf_mode'):
+                self.current_perf_mode = dialog.current_perf_mode
 
     def show_gallery_context_menu(self, position):
         list_widget = self.ui.gallery_section.list_widget
@@ -1453,6 +1543,9 @@ class MediaExplorerApp(QMainWindow):
         self.ui.manhwa_reader.hide()
         if hasattr(self.ui, 'manga_reader'):
             self.ui.manga_reader.hide()
+            
+        if hasattr(self.ui, 'tag_viewer_container'):
+            self.ui.tag_viewer_container.hide()
             
         self.ui.lbl_placeholder.setText("Select a file to view")
         self.ui.lbl_placeholder.show()
@@ -2109,7 +2202,113 @@ class MediaExplorerApp(QMainWindow):
     def on_gallery_item_changed(self, current_item, previous_item):
         if current_item:
             path = current_item.data(Qt.ItemDataRole.UserRole)
-            self.load_media(path)                
+            self.load_media(path)
+            
+            if getattr(self, 'db_connection', None):
+                if hasattr(self, 'tag_fetch_worker') and self.tag_fetch_worker.isRunning():
+                    self.tag_fetch_worker.stop()
+                    self.tag_fetch_worker.wait()
+                
+                self.tag_fetch_worker = TagFetchWorker(self.current_db_path, path)
+                self.tag_fetch_worker.tags_fetched.connect(self.on_tags_fetched)
+                self.tag_fetch_worker.start()
+            else:
+                self.ui.tag_viewer_container.hide()
+
+    def on_tags_fetched(self, tags):
+        self.ui.tag_list_widget.clear()
+        if tags:
+            self.ui.tag_viewer_container.show()
+            for tag in tags:
+                item = QListWidgetItem(tag)
+                self.ui.tag_list_widget.addItem(item)
+        else:
+            self.ui.tag_viewer_container.hide()
+
+    def add_main_tag(self):
+        new_tag = self.ui.input_new_tag.text().strip().lower().replace(" ", "_")
+        if not new_tag: return
+        self.ui.input_new_tag.clear()
+
+        current_item = self.ui.gallery_section.list_widget.currentItem()
+        if not current_item: return
+        path = current_item.data(Qt.ItemDataRole.UserRole)
+        is_custom_manga = path.startswith("custom_manga:")
+
+        try:
+            conn = sqlite3.connect(self.current_db_path)
+            cursor = conn.cursor()
+
+            cursor.execute("INSERT OR IGNORE INTO Tags (tag_name) VALUES (?)", (new_tag,))
+            cursor.execute("SELECT tag_id FROM Tags WHERE tag_name = ?", (new_tag,))
+            tag_id_row = cursor.fetchone()
+            if not tag_id_row: return
+            tag_id = tag_id_row[0]
+
+            if is_custom_manga:
+                manga_id = int(path.split("|")[0].replace("custom_manga:", ""))
+                cursor.execute("INSERT OR IGNORE INTO CustomMangaTags (manga_id, tag_name) VALUES (?, ?)", (manga_id, new_tag))
+            elif os.path.isdir(path):
+                cursor.execute("SELECT gallery_id FROM MangaGalleries WHERE folder_path = ?", (path,))
+                gallery_row = cursor.fetchone()
+                if gallery_row:
+                    cursor.execute("INSERT OR IGNORE INTO MangaTags (gallery_id, tag_id) VALUES (?, ?)", (gallery_row[0], tag_id))
+            else:
+                cursor.execute("SELECT hash FROM Images WHERE file_path = ?", (path,))
+                img_row = cursor.fetchone()
+                if img_row:
+                    cursor.execute("INSERT OR IGNORE INTO ImageTags (hash, tag_id) VALUES (?, ?)", (img_row[0], tag_id))
+
+            conn.commit()
+            conn.close()
+
+            item = QListWidgetItem(new_tag)
+            self.ui.tag_list_widget.addItem(item)
+            self.ui.tag_viewer_container.show()
+        except Exception as e:
+            print(f"Error adding tag: {e}")
+
+    def delete_main_tag(self):
+        selected_items = self.ui.tag_list_widget.selectedItems()
+        if not selected_items: return
+
+        current_item = self.ui.gallery_section.list_widget.currentItem()
+        if not current_item: return
+        path = current_item.data(Qt.ItemDataRole.UserRole)
+        is_custom_manga = path.startswith("custom_manga:")
+
+        try:
+            conn = sqlite3.connect(self.current_db_path)
+            cursor = conn.cursor()
+
+            for item in selected_items:
+                tag_name = item.text()
+                
+                if is_custom_manga:
+                    manga_id = int(path.split("|")[0].replace("custom_manga:", ""))
+                    cursor.execute("DELETE FROM CustomMangaTags WHERE manga_id = ? AND tag_name = ?", (manga_id, tag_name))
+                else:
+                    cursor.execute("SELECT tag_id FROM Tags WHERE tag_name = ?", (tag_name,))
+                    tag_id_row = cursor.fetchone()
+                    if tag_id_row:
+                        tag_id = tag_id_row[0]
+                        if os.path.isdir(path):
+                            cursor.execute("SELECT gallery_id FROM MangaGalleries WHERE folder_path = ?", (path,))
+                            gallery_row = cursor.fetchone()
+                            if gallery_row:
+                                cursor.execute("DELETE FROM MangaTags WHERE gallery_id = ? AND tag_id = ?", (gallery_row[0], tag_id))
+                        else:
+                            cursor.execute("SELECT hash FROM Images WHERE file_path = ?", (path,))
+                            img_row = cursor.fetchone()
+                            if img_row:
+                                cursor.execute("DELETE FROM ImageTags WHERE hash = ? AND tag_id = ?", (img_row[0], tag_id))
+
+                self.ui.tag_list_widget.takeItem(self.ui.tag_list_widget.row(item))
+
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"Error deleting tag: {e}")
 
     def on_search_bar_typed(self, text):
         self.search_timer.start()
@@ -2263,9 +2462,7 @@ class MediaExplorerApp(QMainWindow):
                 search_root.setData(True, Qt.ItemDataRole.UserRole + 2) 
                 search_root.setData(True, Qt.ItemDataRole.UserRole + 4) 
                 self.model.insertRow(0, search_root) 
-                
-            from PyQt6.QtGui import QIcon
-            import os
+                            
             search_root.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "search.svg"))))
 
         files_for_img_thumbs = []
@@ -2322,8 +2519,7 @@ class MediaExplorerApp(QMainWindow):
             
             if not existing_folder:
                 existing_folder = QStandardItem(folder_name)
-                from PyQt6.QtGui import QIcon
-                import os
+                
                 existing_folder.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "folder.svg"))))
                 existing_folder.setData(f"VIRTUAL_GROUP_{folder_name}", Qt.ItemDataRole.UserRole)
                 existing_folder.setData(True, Qt.ItemDataRole.UserRole + 2) 
@@ -2395,8 +2591,7 @@ class MediaExplorerApp(QMainWindow):
         if self.search_render_folders and rendered < items_to_render:
             folder_name, files = self.search_render_folders.pop(0)
             folder_item = QStandardItem(f"{folder_name} ({len(files)} items)")
-            from PyQt6.QtGui import QIcon
-            import os
+            
             folder_item.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "folder.svg"))))
             folder_item.setData(f"VIRTUAL_GROUP_{folder_name}", Qt.ItemDataRole.UserRole)
             folder_item.setData(True, Qt.ItemDataRole.UserRole + 2) 
@@ -2455,9 +2650,6 @@ class MediaExplorerApp(QMainWindow):
 
 
     def auto_load_database(self):
-        from PyQt6.QtCore import QSettings
-        from PyQt6.QtWidgets import QDialog, QMessageBox
-        from Src.Dialogs.setup_dialog import FirstTimeSetupDialog
         
         settings = QSettings("MediaNest", "AppConfig")
         db_folder = settings.value("db_folder_path", "", type=str)

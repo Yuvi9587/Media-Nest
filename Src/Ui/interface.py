@@ -1,11 +1,10 @@
 import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTreeView, 
                              QSplitter, QLabel, QPushButton, QScrollArea, QFrame, 
-                             QSlider, QStyle, QLineEdit, QScrollBar, QSizePolicy, QProgressBar)
-from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QMouseEvent, QPixmap, QIcon
+                             QSlider, QStyle, QLineEdit, QScrollBar, QSizePolicy, QProgressBar, QListWidget, QListWidgetItem)
+from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal, QPoint, QEvent
+from PyQt6.QtGui import QMouseEvent, QPixmap, QIcon, QShortcut, QKeySequence, QCursor
 from PyQt6.QtMultimediaWidgets import QVideoWidget
-from PyQt6.QtCore import pyqtSignal
 
 from Src.Ui.gallery import GallerySection
 from Src.Ui.reader_widget import ManhwaReaderWidget, MangaReaderWidget
@@ -49,7 +48,6 @@ class DynamicImageLabel(QLabel):
         self.is_zoomed = False
         self._zoom_factor = 1.0
         
-        from PyQt6.QtGui import QShortcut, QKeySequence
         self.shortcut_zoom_in_1 = QShortcut(QKeySequence("Ctrl++"), self)
         self.shortcut_zoom_in_1.activated.connect(self.zoom_in_keyboard)
         self.shortcut_zoom_in_2 = QShortcut(QKeySequence("Ctrl+="), self)
@@ -61,8 +59,6 @@ class DynamicImageLabel(QLabel):
         self.update_cursor()
 
     def update_cursor(self):
-        from PyQt6.QtGui import QCursor, QPixmap
-        import os
         if self.is_zoomed:
             pm = QPixmap(resource_path(os.path.join("assets", "uisvg", "zoom_out.svg")))
             self.setCursor(QCursor(pm))
@@ -169,7 +165,6 @@ class DynamicImageLabel(QLabel):
             super().setPixmap(self._raw_pixmap)
             
             def apply_scroll():
-                from PyQt6.QtCore import QPoint
                 content_widget = scroll_area.widget()
                 if not content_widget:
                     return
@@ -188,7 +183,6 @@ class DynamicImageLabel(QLabel):
                 scroll_area.horizontalScrollBar().setValue(int(target_pt.x() - viewport_w / 2.0))
                 scroll_area.verticalScrollBar().setValue(int(target_pt.y() - viewport_h / 2.0))
             
-            from PyQt6.QtCore import QTimer
             QTimer.singleShot(50, apply_scroll)
             self.update_cursor()
             
@@ -215,7 +209,6 @@ class DynamicImageLabel(QLabel):
             self._apply_zoom(1 / 1.1)
 
     def _apply_zoom(self, factor, focus_pos=None):
-        from PyQt6.QtCore import Qt, QPoint, QTimer
         scroll_area = self.get_scroll_area()
         if not scroll_area or not self._raw_pixmap or self._raw_pixmap.isNull():
             return
@@ -297,7 +290,6 @@ class DynamicImageLabel(QLabel):
         QTimer.singleShot(0, apply_scroll)
 
     def wheelEvent(self, event):
-        from PyQt6.QtCore import Qt
         scroll_area = self.get_scroll_area()
         if scroll_area and self.is_zoomed and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
             delta = event.angleDelta().y()
@@ -365,7 +357,6 @@ class ZoomOverlay(QWidget):
             }
         """)
         
-        from PyQt6.QtCore import QTimer
         self.hide_timer = QTimer()
         self.hide_timer.setSingleShot(True)
         self.hide_timer.timeout.connect(self.hide)
@@ -374,7 +365,6 @@ class ZoomOverlay(QWidget):
             parent.installEventFilter(self)
             
     def eventFilter(self, obj, event):
-        from PyQt6.QtCore import QEvent
         if obj == self.parent() and event.type() == QEvent.Type.Resize:
             self.update_position()
         return super().eventFilter(obj, event)
@@ -442,7 +432,10 @@ class VideoContainer(QWidget):
         def get_icon(name):
             return QIcon(os.path.join(self.asset_dir, "Svg", f"{name}.svg"))
 
-        self.left_controls_layout = QHBoxLayout()
+        self.left_controls_container = QWidget()
+        self.left_controls_container.setFixedWidth(250)
+        self.left_controls_layout = QHBoxLayout(self.left_controls_container)
+        self.left_controls_layout.setContentsMargins(0, 0, 0, 0)
         self.left_controls_layout.setSpacing(10)
         
         self.btn_volume = QPushButton()
@@ -465,6 +458,7 @@ class VideoContainer(QWidget):
         
         self.left_controls_layout.addWidget(self.btn_volume)
         self.left_controls_layout.addWidget(self.slider_volume)
+        self.left_controls_layout.addStretch()
         
         self.center_controls_layout = QHBoxLayout()
         self.center_controls_layout.setSpacing(15) 
@@ -537,7 +531,7 @@ class VideoContainer(QWidget):
         self.right_controls_layout.addWidget(self.btn_loop)
         self.right_controls_layout.addWidget(self.btn_fullscreen)        
         
-        self.buttons_layout.addLayout(self.left_controls_layout)
+        self.buttons_layout.addWidget(self.left_controls_container)
         self.buttons_layout.addStretch()
         self.buttons_layout.addLayout(self.center_controls_layout) 
         self.buttons_layout.addStretch()
@@ -740,12 +734,148 @@ class MainWindowUI:
         self.loading_bar.hide()
         self.sidebar_layout.addWidget(self.loading_bar)
 
+        self.sidebar_vertical_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.sidebar_vertical_splitter.setChildrenCollapsible(False)
+
         self.tree_view = QTreeView()
         self.tree_view.setHeaderHidden(True)
         self.tree_view.setAnimated(True)
         self.tree_view.setIndentation(20)
 
-        self.sidebar_layout.addWidget(self.tree_view)
+        self.sidebar_vertical_splitter.addWidget(self.tree_view)
+
+        self.tag_viewer_container = QWidget()
+        self.tag_viewer_layout = QVBoxLayout(self.tag_viewer_container)
+        self.tag_viewer_layout.setContentsMargins(10, 5, 10, 10)
+        self.tag_viewer_layout.setSpacing(5)
+        
+        self.tag_viewer_header_container = QWidget()
+        self.tag_viewer_header_layout = QHBoxLayout(self.tag_viewer_header_container)
+        self.tag_viewer_header_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.tag_viewer_header = QLabel("Tags")
+        self.tag_viewer_header.setStyleSheet("color: #cccccc; font-weight: bold; font-size: 13px;")
+        
+        self.tag_search_input = QLineEdit()
+        self.tag_search_input.setPlaceholderText("Search...")
+        self.tag_search_input.setMaximumWidth(120)
+        self.tag_search_input.setStyleSheet("QLineEdit { background-color: #252526; color: #d4d4d4; border: 1px solid #3e3e42; border-radius: 4px; padding: 2px 4px; }")
+        
+        self.btn_toggle_tags = QPushButton()
+        self.btn_toggle_tags.setIcon(QIcon(resource_path("assets/uisvg/hide_tags.svg")))
+        self.btn_toggle_tags.setIconSize(QSize(20, 20))
+        self.btn_toggle_tags.setFixedSize(28, 28)
+        self.btn_toggle_tags.setStyleSheet("""
+            QPushButton { 
+                border: none; 
+                background: transparent; 
+                padding: 4px; 
+            } 
+            QPushButton:hover { 
+                background-color: #333333; 
+                border-radius: 4px; 
+            }
+        """)
+        self.btn_toggle_tags.clicked.connect(self.toggle_tag_list)
+        self.tag_search_input.textChanged.connect(self.filter_tag_list)
+        
+        self.tag_viewer_header_layout.addWidget(self.tag_viewer_header)
+        self.tag_viewer_header_layout.addStretch()
+        self.tag_viewer_header_layout.addWidget(self.tag_search_input)
+        self.tag_viewer_header_layout.addSpacing(5)
+        self.tag_viewer_header_layout.addWidget(self.btn_toggle_tags)
+        
+        self.tag_viewer_header_layout.addSpacing(5)
+        
+        self.tag_list_widget = QListWidget()
+        self.tag_list_widget.setStyleSheet("""
+            QListWidget {
+                background-color: #252526;
+                color: #d4d4d4;
+                border: 1px solid #3e3e42;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            QListWidget::item {
+                background-color: #333333;
+                border-radius: 4px;
+                margin: 2px;
+                padding: 4px;
+            }
+            QListWidget::item:hover {
+                background-color: #444444;
+            }
+            QListWidget::item:selected {
+                background-color: #007acc;
+                color: white;
+            }
+        """)
+        self.tag_list_widget.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self.tag_list_widget.setWrapping(True)
+        self.tag_list_widget.setFlow(QListWidget.Flow.LeftToRight)
+        self.tag_list_widget.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.tag_list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        self.tag_edit_container = QWidget()
+        self.tag_edit_layout = QHBoxLayout(self.tag_edit_container)
+        self.tag_edit_layout.setContentsMargins(0, 0, 0, 0)
+        self.tag_edit_layout.setSpacing(5)
+
+        self.input_new_tag = QLineEdit()
+        self.input_new_tag.setPlaceholderText("Add tag...")
+        self.input_new_tag.setFixedHeight(28)
+        self.input_new_tag.setStyleSheet("QLineEdit { background-color: #252526; color: #d4d4d4; border: 1px solid #3e3e42; border-radius: 4px; padding: 4px; }")
+
+        self.btn_add_tag_main = QPushButton()
+        self.btn_add_tag_main.setIcon(QIcon(resource_path("assets/uisvg/add.svg")))
+        self.btn_add_tag_main.setIconSize(QSize(16, 16))
+        self.btn_add_tag_main.setFixedSize(28, 28)
+        self.btn_add_tag_main.setStyleSheet("QPushButton { background-color: #3e3e42; border: none; border-radius: 4px; } QPushButton:hover { background-color: #505050; }")
+        self.btn_add_tag_main.setToolTip("Add Tag")
+
+        self.btn_delete_tag_main = QPushButton()
+        self.btn_delete_tag_main.setIcon(QIcon(resource_path("assets/uisvg/remove.svg")))
+        self.btn_delete_tag_main.setIconSize(QSize(16, 16))
+        self.btn_delete_tag_main.setFixedSize(28, 28)
+        self.btn_delete_tag_main.setStyleSheet("QPushButton { background-color: #3e3e42; border: none; border-radius: 4px; } QPushButton:hover { background-color: #505050; }")
+        self.btn_delete_tag_main.setToolTip("Delete Selected Tag")
+
+        self.tag_edit_layout.addWidget(self.input_new_tag)
+        self.tag_edit_layout.addWidget(self.btn_add_tag_main)
+        self.tag_edit_layout.addWidget(self.btn_delete_tag_main)
+
+        self.tag_viewer_layout.addWidget(self.tag_viewer_header_container)
+        self.tag_viewer_layout.addWidget(self.tag_list_widget)
+        self.tag_viewer_layout.addWidget(self.tag_edit_container)
+        
+        self.tag_viewer_container.hide()
+        
+        self.sidebar_vertical_splitter.addWidget(self.tag_viewer_container)
+        self.sidebar_layout.addWidget(self.sidebar_vertical_splitter)
+        self.sidebar_vertical_splitter.setSizes([600, 200])
+
+    def filter_tag_list(self, text):
+        search_term = text.lower()
+        for i in range(self.tag_list_widget.count()):
+            item = self.tag_list_widget.item(i)
+            item.setHidden(search_term not in item.text().lower())
+
+    def toggle_tag_list(self):
+        is_hidden = self.tag_list_widget.isHidden()
+        if is_hidden:
+            self.tag_list_widget.show()
+            self.btn_toggle_tags.setIcon(QIcon(resource_path("assets/uisvg/hide_tags.svg")))
+            if hasattr(self, 'sidebar_vertical_splitter'):
+                sizes = self.sidebar_vertical_splitter.sizes()
+                total = sum(sizes)
+                self.sidebar_vertical_splitter.setSizes([max(total - 200, 0), 200])
+        else:
+            self.tag_list_widget.hide()
+            self.btn_toggle_tags.setIcon(QIcon(resource_path("assets/uisvg/unhide_tags.svg")))
+            if hasattr(self, 'sidebar_vertical_splitter'):
+                sizes = self.sidebar_vertical_splitter.sizes()
+                total = sum(sizes)
+                self.sidebar_vertical_splitter.setSizes([total, 0])
 
     def setup_right_side(self, main_window):
         self.right_container = QWidget()
