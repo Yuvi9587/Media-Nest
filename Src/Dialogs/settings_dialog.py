@@ -611,26 +611,43 @@ class SettingsDialog(QDialog):
                 w.setParent(None)
                 w.deleteLater()
 
-        # Determine aspect ratio of the first image to decide grid columns
+        # Decide column count from aspect ratio
         COLS = 2
         if target_group:
             first_path = target_group[0]['path']
             if os.path.exists(first_path):
                 reader = QImageReader(first_path)
                 orig_size = reader.size()
-                if orig_size.isValid():
-                    # If height is greater than width, it's portrait
-                    if orig_size.height() > orig_size.width():
-                        COLS = 3
+                if orig_size.isValid() and orig_size.height() > orig_size.width():
+                    COLS = 3   # portrait → 3 per row
 
-        # Fill the full panel area
+        import math
+        num_rows   = math.ceil(len(target_group) / COLS)
+        INFO_H     = 32
+        # Small group: ≤ 2 rows → old "fill the panel" expanding behaviour
+        # Large group: > 2 rows → fixed row height so row 3+ overflows → scroll
+        USE_SCROLL = num_rows > 2
+
+        if USE_SCROLL:
+            panel_h = max(self.preview_panel.height(), 400)
+            row_h   = (panel_h - INFO_H - 8 * 3) // 2   # exactly 2 rows visible
+            row_h   = max(row_h, 200)
+
         grid_widget = QWidget()
-        grid_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        if USE_SCROLL:
+            # Preferred height → grid takes natural (content-driven) size
+            # → overflows viewport → preview_scroll scrollbar appears
+            grid_widget.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+            )
+        else:
+            # Expanding height → grid fills the whole panel (original behaviour)
+            grid_widget.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+            )
         grid = QGridLayout(grid_widget)
         grid.setSpacing(8)
         grid.setContentsMargins(0, 0, 0, 0)
-
-        INFO_H = 32
 
         for index, item in enumerate(target_group):
 
@@ -645,11 +662,10 @@ class SettingsDialog(QDialog):
             cell_layout.setSpacing(2)
 
             lbl_img = ResizableImageLabel()
-            
+
             reader = QImageReader(path)
             orig_size = reader.size()
             if orig_size.isValid():
-                # Load a high-res version into memory for the ResizableImageLabel to scale down cleanly
                 reader.setScaledSize(orig_size.scaled(1200, 1200, Qt.AspectRatioMode.KeepAspectRatio))
                 img = reader.read()
                 if not img.isNull():
@@ -657,14 +673,27 @@ class SettingsDialog(QDialog):
 
             is_selected = (path == file_path)
             border_color = "#00a2ff" if is_selected else "#3e3e42"
-            
-            # Create a frame around the image so the border covers the max layout space
+
             frame_img = QFrame()
-            frame_img.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-            frame_img.setStyleSheet(f"background-color: #1e1e1e; border: 2px solid {border_color}; border-radius: 4px;")
+            frame_img.setStyleSheet(
+                f"background-color: #1e1e1e; border: 2px solid {border_color}; border-radius: 4px;"
+            )
             frame_layout = QVBoxLayout(frame_img)
             frame_layout.setContentsMargins(0, 0, 0, 0)
             frame_layout.addWidget(lbl_img)
+
+            if USE_SCROLL:
+                # Hard-lock each row to exactly row_h so rows don't compress
+                cell.setFixedHeight(row_h + INFO_H + 2)
+                frame_img.setFixedHeight(row_h)
+                frame_img.setSizePolicy(
+                    QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+                )
+            else:
+                # Let frame fill whatever space the panel gives (original)
+                frame_img.setSizePolicy(
+                    QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+                )
 
             res_text = f"{orig_size.width()}x{orig_size.height()}" if orig_size.isValid() else "?"
             size_mb = os.path.getsize(path) / (1024 * 1024)
@@ -682,12 +711,14 @@ class SettingsDialog(QDialog):
 
             cell_layout.addWidget(frame_img, stretch=1)
             cell_layout.addWidget(lbl_info)
-            
+
             grid.addWidget(cell, row, col)
-            grid.setRowStretch(row, 1)
-            grid.setColumnStretch(col, 1)
+            if not USE_SCROLL:
+                grid.setRowStretch(row, 1)   # fill mode: rows share panel height
+            grid.setColumnStretch(col, 1)    # always: columns share panel width
 
         self.preview_container_layout.addWidget(grid_widget)
+
 
     def on_tab_changed(self, index):
         tab_name = self.tabs.tabText(index)
@@ -948,65 +979,88 @@ class SettingsDialog(QDialog):
         card_main_layout = QVBoxLayout(group_card)
         card_main_layout.setContentsMargins(15, 15, 15, 15)
 
+        # ── Title row ──────────────────────────────────────────
         header_layout = QHBoxLayout()
-        
-        title_layout = QVBoxLayout()
+
         lbl_title = QLabel(f"Duplicate Group #{i+1}")
         lbl_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #ffffff;")
-        
-        lbl_conf = QLabel(f"Confidence: {avg_conf}%")
+
         conf_color = "#3fb950" if avg_conf > 90 else "#d29922"
-        lbl_conf.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {conf_color}; background-color: rgba(0,0,0,0.2); padding: 3px 6px; border-radius: 4px;")
-        
+        lbl_conf = QLabel(f"Confidence: {avg_conf}%")
+        lbl_conf.setStyleSheet(
+            f"font-size: 12px; font-weight: bold; color: {conf_color}; "
+            "background-color: rgba(0,0,0,0.2); padding: 3px 6px; border-radius: 4px;"
+        )
+
+        title_layout = QVBoxLayout()
+        title_layout.setSpacing(4)
         title_layout.addWidget(lbl_title)
         title_layout.addWidget(lbl_conf, alignment=Qt.AlignmentFlag.AlignLeft)
-        title_layout.setSpacing(4)
-        
-        btn_ignore = QPushButton("Mark as 'Not Duplicates'")
-        btn_ignore.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_ignore.setStyleSheet("QPushButton { background-color: transparent; border: 1px solid #3fb950; color: #3fb950; padding: 4px 10px; border-radius: 4px; font-weight: bold; font-size: 11px; } QPushButton:hover { background-color: rgba(63, 185, 80, 0.1); }")
-        
-        btn_delete_all = QPushButton("Delete All")
-        btn_delete_all.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_delete_all.setStyleSheet("QPushButton { background-color: transparent; border: 1px solid #a31515; color: #a31515; padding: 4px 10px; border-radius: 4px; font-weight: bold; font-size: 11px; } QPushButton:hover { background-color: rgba(163, 21, 21, 0.1); }")
-        
-        btn_auto_del = QPushButton("Auto Delete")
-        btn_auto_del.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_auto_del.setStyleSheet("QPushButton { background-color: transparent; border: 1px solid #d29922; color: #d29922; padding: 4px 10px; border-radius: 4px; font-weight: bold; font-size: 11px; } QPushButton:hover { background-color: rgba(210, 153, 34, 0.1); }")
-        
-        btn_layout = QVBoxLayout()
-        btn_layout.addWidget(btn_auto_del)
-        btn_layout.addWidget(btn_delete_all)
-        btn_layout.addWidget(btn_ignore)
-        btn_layout.setSpacing(4)
-        
+
         header_layout.addLayout(title_layout)
         header_layout.addStretch()
-        header_layout.addLayout(btn_layout)
         card_main_layout.addLayout(header_layout)
-        
+
+        # ── Action buttons row (always full width, never clipped) ──
+        btn_auto_del = QPushButton("Auto Delete")
+        btn_auto_del.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_auto_del.setStyleSheet(
+            "QPushButton { background-color: transparent; border: 1px solid #d29922; "
+            "color: #d29922; padding: 5px 12px; border-radius: 4px; font-weight: bold; font-size: 11px; } "
+            "QPushButton:hover { background-color: rgba(210, 153, 34, 0.12); }"
+        )
+
+        btn_delete_all = QPushButton("Delete All")
+        btn_delete_all.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_delete_all.setStyleSheet(
+            "QPushButton { background-color: transparent; border: 1px solid #a31515; "
+            "color: #a31515; padding: 5px 12px; border-radius: 4px; font-weight: bold; font-size: 11px; } "
+            "QPushButton:hover { background-color: rgba(163, 21, 21, 0.12); }"
+        )
+
+        btn_ignore = QPushButton("Mark as 'Not Duplicates'")
+        btn_ignore.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_ignore.setStyleSheet(
+            "QPushButton { background-color: transparent; border: 1px solid #3fb950; "
+            "color: #3fb950; padding: 5px 12px; border-radius: 4px; font-weight: bold; font-size: 11px; } "
+            "QPushButton:hover { background-color: rgba(63, 185, 80, 0.12); }"
+        )
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        btn_row.addWidget(btn_auto_del)
+        btn_row.addWidget(btn_delete_all)
+        btn_row.addWidget(btn_ignore)
+        btn_row.addStretch()
+        card_main_layout.addLayout(btn_row)
+
+        # ── Divider ────────────────────────────────────────────
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setStyleSheet("background-color: #3e3e42;")
         card_main_layout.addWidget(line)
 
+
         COLS = 3
-        group_images_grid = QGridLayout()
-        group_images_grid.setSpacing(10)
         has_checkboxes = len(group_items) >= 3
         checkbox_refs = []
         nav_group_row = []
+        USE_SCROLL = len(group_items) > 4
 
+        # ── Build each thumbnail item widget ──────────────────────
+        item_widgets = []
         for idx, item in enumerate(group_items):
             file_path = item['path']
-            row, col = divmod(idx, COLS)
 
             item_widget = QWidget()
+            item_widget.setFixedWidth(110)
             item_layout = QVBoxLayout(item_widget)
             item_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
             item_layout.setContentsMargins(5, 5, 5, 5)
+            item_layout.setSpacing(4)
 
             thumb_layout = QVBoxLayout()
+            thumb_layout.setSpacing(2)
 
             lbl_thumb = FocusableClickableLabel(file_path)
             lbl_thumb.clicked.connect(self.show_preview)
@@ -1029,25 +1083,117 @@ class SettingsDialog(QDialog):
 
             lbl_name = QLabel(os.path.basename(file_path))
             lbl_name.setWordWrap(True)
-            lbl_name.setStyleSheet("font-weight: bold; margin-top: 4px; font-size: 12px; color: #e0e0e0;")
+            lbl_name.setStyleSheet("font-weight: bold; margin-top: 4px; font-size: 11px; color: #e0e0e0;")
 
             lbl_info = QLabel("Loading info...")
-            lbl_info.setStyleSheet("color: #858585; font-size: 11px;")
+            lbl_info.setStyleSheet("color: #858585; font-size: 10px;")
 
             self.thumb_labels_map[file_path] = {'thumb': lbl_thumb, 'info': lbl_info}
 
             btn_del = QPushButton("Recycle Bin")
             btn_del.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_del.setStyleSheet("QPushButton { background-color: #a31515; color: white; padding: 6px; margin-top: 4px; border-radius: 4px; } QPushButton:hover { background-color: #d13438; }")
-            btn_del.clicked.connect(lambda checked, p=file_path, w=item_widget, gd=group_data, cbs=checkbox_refs, gc=group_card: self.delete_duplicate(p, w, gd, cbs, gc))
+            btn_del.setStyleSheet(
+                "QPushButton { background-color: #a31515; color: white; padding: 5px; margin-top: 4px; "
+                "border-radius: 4px; font-size: 10px; } "
+                "QPushButton:hover { background-color: #d13438; }"
+            )
+            btn_del.clicked.connect(
+                lambda checked, p=file_path, w=item_widget, gd=group_data,
+                       cbs=checkbox_refs, gc=group_card:
+                self.delete_duplicate(p, w, gd, cbs, gc)
+            )
 
             item_layout.addLayout(thumb_layout)
             item_layout.addWidget(lbl_name)
             item_layout.addWidget(lbl_info)
             item_layout.addWidget(btn_del)
-            group_images_grid.addWidget(item_widget, row, col)
+            item_widgets.append((idx, item_widget))
 
-        card_main_layout.addLayout(group_images_grid)
+        # ── Assemble into grid or scrollable strip ─────────────────
+        if USE_SCROLL:
+            # Heights: thumb=90, checkbox=22, name=28, info=18, btn=28,
+            #          spacing(4×4)=16, margins(5+5)=10 → ~212px per item
+            ITEM_H    = 220   # fixed height per card (8px headroom)
+            STRIP_H   = ITEM_H + 12   # + 6px top + 6px bottom padding
+            SA_H      = STRIP_H + 18  # + scrollbar (10px) + border (2×4px)
+            ITEM_W    = 110
+            ITEM_STEP = ITEM_W + 6    # width + spacing between items
+            STRIP_W   = len(item_widgets) * ITEM_STEP + 12  # + left+right padding
+
+            # Fix every item card to the same size so nothing overflows
+            for _, w in item_widgets:
+                w.setFixedSize(ITEM_W, ITEM_H)
+
+            strip_widget = QWidget()
+            strip_widget.setStyleSheet("background-color: transparent;")
+            strip_widget.setFixedSize(STRIP_W, STRIP_H)
+
+            strip_layout = QHBoxLayout(strip_widget)
+            strip_layout.setContentsMargins(6, 6, 6, 6)
+            strip_layout.setSpacing(6)
+            strip_layout.setAlignment(
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+            )
+            for _, w in item_widgets:
+                strip_layout.addWidget(w)
+
+            scroll_area = QScrollArea()
+            scroll_area.setWidgetResizable(False)   # we control sizes explicitly
+            scroll_area.setWidget(strip_widget)
+            scroll_area.setHorizontalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAsNeeded
+            )
+            scroll_area.setVerticalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            )
+            # Hard-lock the scroll area height so the parent QVBoxLayout
+            # cannot expand it (Fixed policy beats Expanding)
+            scroll_area.setFixedHeight(SA_H)
+            scroll_area.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )
+            scroll_area.setStyleSheet("""
+                QScrollArea {
+                    background-color: #1a1a1a;
+                    border: 1px solid #3e3e42;
+                    border-radius: 6px;
+                }
+                QScrollBar:horizontal {
+                    background: #1e1e1e;
+                    height: 10px;
+                    border-radius: 5px;
+                    margin: 0px 4px;
+                }
+                QScrollBar::handle:horizontal {
+                    background: #555;
+                    border-radius: 5px;
+                    min-width: 30px;
+                }
+                QScrollBar::handle:horizontal:hover { background: #888; }
+                QScrollBar::add-line:horizontal,
+                QScrollBar::sub-line:horizontal { width: 0px; }
+            """)
+
+            hint = QLabel(
+                f"  {len(group_items)} images — scroll horizontally to see all  ›"
+            )
+            hint.setStyleSheet(
+                "color: #666; font-size: 10px; font-style: italic; padding-left: 2px;"
+            )
+            card_main_layout.addWidget(hint)
+            card_main_layout.addWidget(scroll_area)
+
+        else:
+            # Normal 3-column grid for ≤ 4 items
+            group_images_grid = QGridLayout()
+            group_images_grid.setSpacing(10)
+
+            for idx, w in item_widgets:
+                row, col = divmod(idx, COLS)
+                group_images_grid.addWidget(w, row, col)
+
+            card_main_layout.addLayout(group_images_grid)
+
         
         btn_ignore.clicked.connect(lambda checked, gc=group_card, gd=group_data, cbs=checkbox_refs: self.mark_not_duplicates(gc, gd, cbs))
         btn_delete_all.clicked.connect(lambda checked, gc=group_card, gd=group_data: self.delete_all_duplicates(gc, gd))

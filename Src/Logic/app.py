@@ -27,6 +27,7 @@ from Src.Logic.paths import resource_path
 from Src.Dialogs.settings_dialog import SettingsDialog
 from Src.Ui.theme import VSCODE_DARK_THEME
 from Src.Dialogs.setup_dialog import FirstTimeSetupDialog
+from Src.Dialogs.support_dialog import SupportDialog
 
 class VideoThumbnailer(QObject):
     thumbnail_ready = pyqtSignal(str, QImage)
@@ -852,7 +853,7 @@ class MediaExplorerApp(QMainWindow):
         self.ui = MainWindowUI()
         self.image_cache = {}
         self.ui.setup_ui(self)
-        self.setWindowTitle("Media Nest V2.0.0")
+        self.setWindowTitle("Media Nest V3.0.0")
         theme = VSCODE_DARK_THEME
         
         try:
@@ -923,6 +924,7 @@ class MediaExplorerApp(QMainWindow):
         self.ui.btn_load_db.clicked.connect(self.auto_load_database)
         self.ui.btn_change_db.clicked.connect(self.open_settings_dialog)        
         self.ui.btn_detach.clicked.connect(self.toggle_detached_viewer)
+        self.ui.btn_support.clicked.connect(self.open_support_dialog)
         self.floating_viewer = None
         self.ui.tree_view.expanded.connect(self.on_item_expanded)
         self.ui.tree_view.clicked.connect(self.on_tree_item_clicked)
@@ -1248,6 +1250,11 @@ class MediaExplorerApp(QMainWindow):
             
             if hasattr(dialog, 'current_perf_mode'):
                 self.current_perf_mode = dialog.current_perf_mode
+
+    def open_support_dialog(self):
+        """Opens the Support & Community dialog."""
+        dialog = SupportDialog(self)
+        dialog.exec()
 
     def show_gallery_context_menu(self, position):
         list_widget = self.ui.gallery_section.list_widget

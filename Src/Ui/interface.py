@@ -673,10 +673,25 @@ class MainWindowUI:
             QPushButton:hover { background-color: #505050; }
         """)
 
+        self.btn_support = QPushButton()
+        self.btn_support.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "heart.svg"))))
+        self.btn_support.setIconSize(QSize(24, 24))
+        self.btn_support.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_support.setFixedSize(45, 45)
+        self.btn_support.setToolTip("Support & Community")
+        self.btn_support.setStyleSheet("""
+            QPushButton {
+                background-color: #3e3e42;
+                border-radius: 10px;
+            }
+            QPushButton:hover { background-color: #505050; }
+        """)
+
         self.header_layout.addWidget(self.btn_open)
         self.header_layout.addWidget(self.btn_load_db)
         self.header_layout.addWidget(self.btn_change_db)
         self.header_layout.addWidget(self.btn_detach)
+        self.header_layout.addWidget(self.btn_support)
         self.header_layout.addStretch()
 
         self.sidebar_layout.addWidget(self.header_frame)
