@@ -588,7 +588,7 @@ Shows the final ordered page list for your manga.
 
 | Type | Formats |
 |---|---|
-| **Images** | JPG, JPEG, PNG, GIF (animated), BMP, WebP |
+| **Images** | JPG, JPEG, PNG, GIF, BMP, WebP |
 | **Videos** | MP4, MKV, AVI, MOV, WebM |
 | **Manga / Manhwa** | Folders containing image files |
 
