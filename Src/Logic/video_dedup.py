@@ -58,10 +58,14 @@ class ThumbnailWorker(QThread):
                     "-i", path, "-vframes", "1",
                     "-f", "image2pipe", "-vcodec", "mjpeg", "-"
                 ]
-                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=0x08000000)
-                out, _ = process.communicate(timeout=5)
-                if out:
-                    self.result_ready.emit(path, out)
+                with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=0x08000000) as process:
+                    try:
+                        out, _ = process.communicate(timeout=5)
+                        if out:
+                            self.result_ready.emit(path, out)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
             except Exception:
                 pass
 
@@ -265,7 +269,7 @@ class VideoDedupTab(QWidget):
         self.audio_output = QAudioOutput()
         self.audio_output.setVolume(0.5) 
         
-        self.media_player = QMediaPlayer()
+        self.media_player = QMediaPlayer(self)
         self.media_player.setAudioOutput(self.audio_output)
         self.media_player.setVideoOutput(self.video_widget)
         
@@ -336,7 +340,7 @@ class VideoDedupTab(QWidget):
         if not os.path.exists(db_file): return groups, False
         
         try:
-            conn = sqlite3.connect(db_file)
+            conn = self.settings_dialog.shared_conn
             cursor = conn.cursor()
             
             cursor.execute("CREATE TABLE IF NOT EXISTS IgnoredPairs (hash1 TEXT, hash2 TEXT, PRIMARY KEY (hash1, hash2))")
@@ -344,7 +348,6 @@ class VideoDedupTab(QWidget):
             ignored_set = {tuple(sorted((row[0], row[1]))) for row in cursor.fetchall()}
             
             if not ignored_set:
-                conn.close()
                 return groups, False
 
             all_paths = set()
@@ -356,7 +359,6 @@ class VideoDedupTab(QWidget):
             cursor.execute("SELECT file_path, hash FROM Images")
             for p, h in cursor.fetchall():
                 if p in all_paths: path_to_hash[p] = h
-            conn.close()
             
             valid_groups = []
             changes_made = False
@@ -516,7 +518,7 @@ class VideoDedupTab(QWidget):
             QMessageBox.critical(self, "Error", "Could not find library.db.")
             return
 
-        conn = sqlite3.connect(db_file)
+        conn = self.settings_dialog.shared_conn
         cursor = conn.cursor()
         try:
             cursor.execute("SELECT file_path FROM Images")
@@ -524,7 +526,6 @@ class VideoDedupTab(QWidget):
         except sqlite3.OperationalError:
             cursor.execute("SELECT file_name FROM characters")
             all_files = [row[0] for row in cursor.fetchall() if row[0]]
-        conn.close()
 
         video_exts = {'.mp4', '.mkv', '.webm', '.avi', '.mov', '.wmv', '.m4v'}
         video_files = [f for f in all_files if os.path.splitext(f)[1].lower() in video_exts]
@@ -803,7 +804,7 @@ class VideoDedupTab(QWidget):
         db_file = os.path.join(db_folder, "library.db")
         if not os.path.exists(db_file): return
 
-        conn = sqlite3.connect(db_file)
+        conn = self.settings_dialog.shared_conn
         cursor = conn.cursor()
 
         path_to_hash = {}
@@ -820,7 +821,6 @@ class VideoDedupTab(QWidget):
 
         all_paths = [item['Path'] for item in group_items if item['Path'] in path_to_hash]
         if len(all_paths) < 2:
-            conn.close()
             return 
 
         pairs_to_ignore = []
@@ -840,7 +840,6 @@ class VideoDedupTab(QWidget):
             
             if not selected_paths:
                 QMessageBox.warning(self, "Selection Required", "Please check the box next to the video(s) that are not duplicates.")
-                conn.close()
                 return
                 
             for sel_path in selected_paths:
@@ -856,7 +855,6 @@ class VideoDedupTab(QWidget):
             cursor.execute("INSERT OR IGNORE INTO IgnoredPairs (hash1, hash2) VALUES (?, ?)", (h1, h2))
             
         conn.commit()
-        conn.close()
 
         if os.path.exists(self.output_json_path):
             try:
@@ -896,14 +894,11 @@ class VideoDedupTab(QWidget):
                 if os.path.exists(file_path): 
                     send2trash(file_path)
                 
-                db_folder = self.settings_dialog.db_path_input.text().strip()
-                db_file = os.path.join(db_folder, "library.db")
-                if os.path.exists(db_file):
-                    conn = sqlite3.connect(db_file)
+                if self.settings_dialog.shared_conn:
+                    conn = self.settings_dialog.shared_conn
                     cursor = conn.cursor()
                     cursor.execute("DELETE FROM Images WHERE file_path = ?", (file_path,))
                     conn.commit()
-                    conn.close()
 
                 if os.path.exists(self.output_json_path):
                     with open(self.output_json_path, 'r', encoding='utf-8') as f:

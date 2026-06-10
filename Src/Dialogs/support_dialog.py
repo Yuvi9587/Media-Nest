@@ -14,9 +14,9 @@ from PyQt6.QtGui import (
 from Src.Logic.paths import resource_path
 
 
-# ─────────────────────────────────────────────────────────
-#  Colour tokens
-# ─────────────────────────────────────────────────────────
+
+
+
 BG_DARK      = "#161618"
 BG_CARD      = "#1E1E22"
 BG_CARD_HVR  = "#27272D"
@@ -46,18 +46,18 @@ class GradientBanner(QWidget):
         grad.setColorAt(1.0,  QColor("#3A0D1E"))
         p.fillRect(r, QBrush(grad))
 
-        # top-right glow
+
         c1 = QColor(255, 77, 109, 45)
         p.setBrush(QBrush(c1))
         p.setPen(Qt.PenStyle.NoPen)
         p.drawEllipse(r.width() - 100, -50, 200, 200)
 
-        # bottom-left glow
+
         c2 = QColor(77, 159, 255, 30)
         p.setBrush(QBrush(c2))
         p.drawEllipse(-70, r.height() - 70, 180, 180)
 
-        # bottom divider
+
         pen = QPen(QColor(255, 77, 109, 70))
         pen.setWidthF(1.0)
         p.setPen(pen)
@@ -105,13 +105,13 @@ class GridCard(QPushButton):
         shadow.setColor(QColor(0, 0, 0, 110))
         self.setGraphicsEffect(shadow)
 
-        # Layout
+
         col = QVBoxLayout(self)
         col.setContentsMargins(12, 16, 12, 12)
         col.setSpacing(6)
         col.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
-        # Icon
+
         icon_lbl = QLabel()
         icon_lbl.setFixedSize(icon_size, icon_size)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -129,7 +129,7 @@ class GridCard(QPushButton):
         icon_wrap.addStretch()
         col.addLayout(icon_wrap)
 
-        # Title
+
         t_lbl = QLabel(title)
         tf = QFont()
         tf.setPointSize(10)
@@ -140,7 +140,7 @@ class GridCard(QPushButton):
         t_lbl.setWordWrap(True)
         col.addWidget(t_lbl)
 
-        # Subtitle
+
         s_lbl = QLabel(subtitle)
         sf = QFont()
         sf.setPointSize(8)
@@ -152,7 +152,7 @@ class GridCard(QPushButton):
 
         col.addStretch()
 
-        # Accent bottom pill
+
         pill = QLabel()
         pill.setFixedHeight(3)
         pill.setStyleSheet(
@@ -207,7 +207,7 @@ class SupportDialog(QDialog):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── Hero Banner ────────────────────────────────────────
+
         banner = GradientBanner(self)
         bl = QVBoxLayout(banner)
         bl.setContentsMargins(26, 18, 26, 14)
@@ -234,14 +234,14 @@ class SupportDialog(QDialog):
 
         root.addWidget(banner)
 
-        # ── Body ──────────────────────────────────────────────
+
         body_w = QWidget()
         body_w.setStyleSheet(f"background-color: {BG_DARK};")
         body = QVBoxLayout(body_w)
         body.setContentsMargins(22, 18, 22, 18)
         body.setSpacing(10)
 
-        # ── Row 1: Donate ─────────────────────────────────────
+
         body.addWidget(SectionLabel("Contribute Financially", accent=ACCENT_PINK))
         body.addSpacing(6)
 
@@ -267,7 +267,7 @@ class SupportDialog(QDialog):
         ))
         body.addLayout(row1)
 
-        # ── Divider ───────────────────────────────────────────
+
         body.addSpacing(14)
         div = QFrame()
         div.setFrameShape(QFrame.Shape.HLine)
@@ -276,7 +276,7 @@ class SupportDialog(QDialog):
         body.addWidget(div)
         body.addSpacing(10)
 
-        # ── Row 2: Community ──────────────────────────────────
+
         body.addWidget(SectionLabel("Get Help & Connect", accent=ACCENT_BLU))
         body.addSpacing(6)
 
@@ -302,7 +302,7 @@ class SupportDialog(QDialog):
         ))
         body.addLayout(row2)
 
-        # ── Close button ──────────────────────────────────────
+
         body.addSpacing(18)
 
         close_btn = QPushButton("Close")

@@ -838,21 +838,21 @@ class MainWindowUI:
 
         self.input_new_tag = QLineEdit()
         self.input_new_tag.setPlaceholderText("Add tag...")
-        self.input_new_tag.setFixedHeight(28)
+        self.input_new_tag.setFixedHeight(30)
         self.input_new_tag.setStyleSheet("QLineEdit { background-color: #252526; color: #d4d4d4; border: 1px solid #3e3e42; border-radius: 4px; padding: 4px; }")
 
         self.btn_add_tag_main = QPushButton()
         self.btn_add_tag_main.setIcon(QIcon(resource_path("assets/uisvg/add.svg")))
         self.btn_add_tag_main.setIconSize(QSize(16, 16))
-        self.btn_add_tag_main.setFixedSize(28, 28)
-        self.btn_add_tag_main.setStyleSheet("QPushButton { background-color: #3e3e42; border: none; border-radius: 4px; } QPushButton:hover { background-color: #505050; }")
+        self.btn_add_tag_main.setFixedSize(40, 30)
+        self.btn_add_tag_main.setStyleSheet("QPushButton { background-color: #3e3e42; border: none; border-radius: 4px; padding: 7px 12px; } QPushButton:hover { background-color: #505050; }")
         self.btn_add_tag_main.setToolTip("Add Tag")
 
         self.btn_delete_tag_main = QPushButton()
         self.btn_delete_tag_main.setIcon(QIcon(resource_path("assets/uisvg/remove.svg")))
         self.btn_delete_tag_main.setIconSize(QSize(16, 16))
-        self.btn_delete_tag_main.setFixedSize(28, 28)
-        self.btn_delete_tag_main.setStyleSheet("QPushButton { background-color: #3e3e42; border: none; border-radius: 4px; } QPushButton:hover { background-color: #505050; }")
+        self.btn_delete_tag_main.setFixedSize(40, 30)
+        self.btn_delete_tag_main.setStyleSheet("QPushButton { background-color: #3e3e42; border: none; border-radius: 4px; padding: 7px 12px; } QPushButton:hover { background-color: #505050; }")
         self.btn_delete_tag_main.setToolTip("Delete Selected Tag")
 
         self.tag_edit_layout.addWidget(self.input_new_tag)

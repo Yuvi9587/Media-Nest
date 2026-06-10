@@ -416,6 +416,7 @@ class DatabaseSearchWorker(QThread):
     def run(self):
         try:
             conn = sqlite3.connect(self.db_path)
+            conn.execute("PRAGMA journal_mode=WAL;")
             cursor = conn.cursor()
 
             raw_tags = [t.strip() for t in self.search_text.split(',') if t.strip()]
@@ -446,7 +447,7 @@ class DatabaseSearchWorker(QThread):
                 FROM Images
                 JOIN ImageTags ON Images.hash = ImageTags.hash
                 JOIN Tags ON ImageTags.tag_id = Tags.tag_id
-                WHERE Tags.tag_name IN ({placeholders})
+                WHERE Tags.tag_name IN ({placeholders}){file_filter_sql}
                 GROUP BY Images.hash
                 HAVING 1=1
             """
@@ -587,6 +588,7 @@ class TagFetchWorker(QThread):
         try:
             
             conn = sqlite3.connect(self.db_path)
+            conn.execute("PRAGMA journal_mode=WAL;")
             cursor = conn.cursor()
             
             tags = []
@@ -800,17 +802,20 @@ class FolderButtonDelegate(QStyledItemDelegate):
             20
         )
 
+        ICON_SIZE = 20
+        BUTTON_W  = 30
+
         button_rect = QRect(
-            option.rect.right() - 30,
+            option.rect.right() - BUTTON_W,
             option.rect.top(),
-            30,
+            BUTTON_W,
             option.rect.height()
         )
 
         painter.save()
 
-        x = button_rect.x() + (button_rect.width() - pixmap.width()) // 2
-        y = button_rect.y() + (button_rect.height() - pixmap.height()) // 2
+        x = button_rect.center().x() - ICON_SIZE // 2
+        y = option.rect.center().y() - ICON_SIZE // 2
 
         painter.drawPixmap(x, y, pixmap)
 
@@ -1151,10 +1156,14 @@ class MediaExplorerApp(QMainWindow):
                 matches_name = name_query in text_lower
                 
             matches_type = True
-            if filter_type == "Images":
-                matches_type = "🎬" not in text
-            elif filter_type == "Videos":
-                matches_type = "🖼️" not in text
+            if filter_type != "All":
+                file_path = item.data(Qt.ItemDataRole.UserRole)
+                if file_path:
+                    file_path_lower = file_path.lower()
+                    if filter_type == "Images":
+                        matches_type = any(file_path_lower.endswith(e) for e in self.clean_img_exts)
+                    elif filter_type == "Videos":
+                        matches_type = any(file_path_lower.endswith(e) for e in self.clean_vid_exts)
                 
             item.setHidden(not (matches_name and matches_type))
 
@@ -2037,6 +2046,7 @@ class MediaExplorerApp(QMainWindow):
         paths = []
         try:
             conn = sqlite3.connect(self.current_db_path)
+            conn.execute("PRAGMA journal_mode=WAL;")
             cursor = conn.cursor()
             cursor.execute("SELECT image_path FROM CustomMangaPages WHERE manga_id = ? ORDER BY page_number ASC", (manga_id,))
             paths = [row[0].strip() for row in cursor.fetchall()]
@@ -2244,6 +2254,7 @@ class MediaExplorerApp(QMainWindow):
 
         try:
             conn = sqlite3.connect(self.current_db_path)
+            conn.execute("PRAGMA journal_mode=WAL;")
             cursor = conn.cursor()
 
             cursor.execute("INSERT OR IGNORE INTO Tags (tag_name) VALUES (?)", (new_tag,))
@@ -2286,6 +2297,7 @@ class MediaExplorerApp(QMainWindow):
 
         try:
             conn = sqlite3.connect(self.current_db_path)
+            conn.execute("PRAGMA journal_mode=WAL;")
             cursor = conn.cursor()
 
             for item in selected_items:
@@ -2658,6 +2670,40 @@ class MediaExplorerApp(QMainWindow):
 
     def auto_load_database(self):
         
+        if self.ui.btn_load_db.text().strip() == "DB ACTIVE":
+            if getattr(self, 'db_connection', None):
+                try:
+                    self.db_connection.close()
+                except Exception:
+                    pass
+                self.db_connection = None
+
+            self.ui.btn_load_db.setText(" LOAD DB")
+            self.ui.btn_load_db.setStyleSheet("""
+                QPushButton {
+                    background-color: #238636;
+                    color: white;
+                    border-radius: 10px; 
+                    font-weight: bold;
+                    font-size: 14px;     
+                    padding: 0px 20px;   
+                }
+                QPushButton:hover { background-color: #2ea043; }
+            """)
+            
+            self.ui.gallery_section.list_widget.clear()
+            self.model.clear()
+            self.model.setHorizontalHeaderLabels(["Name"])
+            self.ui.search_bar.clear()
+            
+            if hasattr(self, 'tag_completer'):
+                self.tag_completer.model().setStringList([])
+                
+            self.clear_media_viewer()
+                
+            print("Database disconnected cleanly.")
+            return
+            
         settings = QSettings("MediaNest", "AppConfig")
         db_folder = settings.value("db_folder_path", "", type=str)
         
@@ -2695,6 +2741,7 @@ class MediaExplorerApp(QMainWindow):
             char_db_path = os.path.join(self.current_db_folder, "characters.db")
             if os.path.exists(char_db_path):
                 char_conn = sqlite3.connect(char_db_path)
+                char_conn.execute("PRAGMA journal_mode=WAL;")
                 char_cursor = char_conn.cursor()
                 char_cursor.execute("SELECT DISTINCT character_name FROM Characters")
                 chars = [row[0] for row in char_cursor.fetchall()]
@@ -2733,6 +2780,7 @@ class MediaExplorerApp(QMainWindow):
         try:
             self.current_db_path = db_path
             self.db_connection = sqlite3.connect(db_path, check_same_thread=False)
+            self.db_connection.execute("PRAGMA journal_mode=WAL;")
             
             cursor = self.db_connection.cursor()
             
@@ -2755,6 +2803,7 @@ class MediaExplorerApp(QMainWindow):
                 char_db_path = os.path.join(self.current_db_folder, "characters.db")
                 if os.path.exists(char_db_path):
                     char_conn = sqlite3.connect(char_db_path)
+                    char_conn.execute("PRAGMA journal_mode=WAL;")
                     char_cursor = char_conn.cursor()
                     char_cursor.execute("SELECT DISTINCT character_name FROM Characters")
                     chars = [row[0] for row in char_cursor.fetchall()]

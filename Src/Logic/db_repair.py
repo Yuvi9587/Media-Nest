@@ -24,22 +24,22 @@ def _svg(name) -> str:
 
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Background Worker
-# ─────────────────────────────────────────────────────────────────────────────
+
+
+
 
 class DbRepairWorker(QThread):
-    log_signal      = pyqtSignal(str, str)          # message, color ("#rrggbb")
-    progress_signal = pyqtSignal(int, int)           # current, total
-    result_signal   = pyqtSignal(list, list)         # relocated_list, orphan_list
+    log_signal      = pyqtSignal(str, str)
+    progress_signal = pyqtSignal(int, int)
+    result_signal   = pyqtSignal(list, list)
     finished_signal = pyqtSignal()
 
     def __init__(self, library_db, scan_mode, target_path, match_mode):
         super().__init__()
         self.library_db  = library_db
-        self.scan_mode   = scan_mode    # "deep" | "target"
-        self.target_path = target_path  # used when scan_mode == "target"
-        self.match_mode  = match_mode   # "both" | "filename" | "hash"
+        self.scan_mode   = scan_mode
+        self.target_path = target_path
+        self.match_mode  = match_mode
         self._abort      = False
 
     def abort(self):
@@ -59,6 +59,7 @@ class DbRepairWorker(QThread):
     def _get_broken_records(self):
         """Return list of (hash, file_path, file_name) whose paths don't exist."""
         conn = sqlite3.connect(self.library_db)
+        conn.execute("PRAGMA journal_mode=WAL;")
         cur  = conn.cursor()
         cur.execute("SELECT hash, file_path, file_name FROM Images")
         rows = cur.fetchall()
@@ -70,7 +71,7 @@ class DbRepairWorker(QThread):
         folder = os.path.dirname(path)
         while folder and not os.path.exists(folder):
             parent = os.path.dirname(folder)
-            if parent == folder: # Reached drive root
+            if parent == folder:
                 break
             folder = parent
         return folder if os.path.exists(folder) else None
@@ -79,25 +80,25 @@ class DbRepairWorker(QThread):
         root_counts = Counter()
         drive_set   = set()
         for _, file_path, _ in broken_records:
-            # 1. Find the deepest folder that still exists
+
             survivor = self._get_surviving_ancestor(file_path)
             if survivor:
                 root_counts[survivor] += 1
-            
-            # Track the original drive
+
+
             drive = os.path.splitdrive(file_path)[0]
             if drive:
                 drive_set.add(drive.upper() + os.sep)
 
-        # Start with the most common surviving folders
+
         smart_roots = [r for r, _ in root_counts.most_common()]
-        
-        # Fallback 1: The original drives of the broken files
+
+
         for d in sorted(drive_set):
             if d not in smart_roots:
                 smart_roots.append(d)
-                
-        # Fallback 2: All other available drives on the system (excluding C:)
+
+
         import string
         for letter in string.ascii_uppercase:
             if letter == 'C':
@@ -105,7 +106,7 @@ class DbRepairWorker(QThread):
             d = f"{letter}:\\"
             if os.path.exists(d) and d not in smart_roots:
                 smart_roots.append(d)
-                
+
         return smart_roots
 
     def _iter_scan_paths(self, broken_records):
@@ -149,7 +150,7 @@ class DbRepairWorker(QThread):
 
                 dirnames[:] = [d for d in dirnames
                                if not d.startswith('.') and d.lower() not in (
-                                   "$recycle.bin", "system volume information", 
+                                   "$recycle.bin", "system volume information",
                                    "__pycache__", "venv", "venv312", "env", "node_modules"
                                )]
 
@@ -208,9 +209,9 @@ class DbRepairWorker(QThread):
         self.finished_signal.emit()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# UI Tab
-# ─────────────────────────────────────────────────────────────────────────────
+
+
+
 
 class DbRepairTab(QWidget):
     def __init__(self, settings_dialog, parent=None):
@@ -228,23 +229,23 @@ class DbRepairTab(QWidget):
         root.setContentsMargins(0, 6, 0, 0)
         root.setSpacing(8)
 
-        # ── Custom Title with Icon ───────────────────────────────────────────
+
         title_row = QHBoxLayout()
         title_row.setContentsMargins(4, 0, 0, 0)
         title_row.setSpacing(8)
-        
+
         title_icon = QLabel()
         title_icon.setPixmap(QIcon(_svg("wrench.svg")).pixmap(16, 16))
-        
+
         title_label = QLabel("Database Repair")
         title_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #cccccc;")
-        
+
         title_row.addWidget(title_icon, alignment=Qt.AlignmentFlag.AlignVCenter)
         title_row.addWidget(title_label, alignment=Qt.AlignmentFlag.AlignVCenter)
         title_row.addStretch()
         root.addLayout(title_row)
-        
-        # Add a subtle separator line under the title
+
+
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
@@ -252,7 +253,7 @@ class DbRepairTab(QWidget):
         line.setFixedHeight(1)
         root.addWidget(line)
 
-        # ── controls row ─────────────────────────────────────────────────────
+
         ctrl_row = QHBoxLayout()
 
         self.combo_scan_mode = QComboBox()
@@ -318,17 +319,17 @@ class DbRepairTab(QWidget):
         ctrl_row.addWidget(self.btn_abort)
         root.addLayout(ctrl_row)
 
-        # ── progress bar ─────────────────────────────────────────────────────
+
         self.progress_bar = QProgressBar()
         self.progress_bar.setFixedHeight(6)
         self.progress_bar.setTextVisible(False)
         self.progress_bar.hide()
         root.addWidget(self.progress_bar)
 
-        # ── horizontal splitter: [log console] | [relocated + orphan tables] ─
+
         h_splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # LEFT: live log console
+
         log_group = QGroupBox("")
         log_group.setObjectName("ScanLogGroup")
         log_inner = QVBoxLayout(log_group)
@@ -355,10 +356,10 @@ class DbRepairTab(QWidget):
         log_inner.addWidget(self.log_console)
         h_splitter.addWidget(log_group)
 
-        # RIGHT: results stacked vertically in a sub-splitter
+
         v_splitter = QSplitter(Qt.Orientation.Vertical)
 
-        # Relocated Files
+
         self.relocated_group = QGroupBox("")
         rel_layout = QVBoxLayout(self.relocated_group)
         rel_layout.setContentsMargins(6, 6, 6, 6)
@@ -415,7 +416,7 @@ class DbRepairTab(QWidget):
         rel_layout.addLayout(rel_action_row)
         v_splitter.addWidget(self.relocated_group)
 
-        # Orphan Records
+
         self.orphan_group = QGroupBox("")
         orp_layout = QVBoxLayout(self.orphan_group)
         orp_layout.setContentsMargins(6, 6, 6, 6)
@@ -489,7 +490,7 @@ class DbRepairTab(QWidget):
         self._relocated_data = []
         self._orphan_data    = []
 
-    # ── slots ─────────────────────────────────────────────────────────────────
+
 
     def _on_mode_changed(self, idx):
         is_target = (idx == 1)
@@ -616,6 +617,7 @@ class DbRepairTab(QWidget):
         fail_count = 0
         try:
             conn   = sqlite3.connect(library_db)
+            conn.execute("PRAGMA journal_mode=WAL;")
             cursor = conn.cursor()
             for h, old_path, new_path, match_type in self._relocated_data:
                 if move_back:
@@ -694,6 +696,7 @@ class DbRepairTab(QWidget):
 
         try:
             conn   = sqlite3.connect(library_db)
+            conn.execute("PRAGMA journal_mode=WAL;")
             cursor = conn.cursor()
             for h in selected_hashes:
                 cursor.execute("DELETE FROM Images WHERE hash = ?",    (h,))

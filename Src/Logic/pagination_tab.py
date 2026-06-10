@@ -55,11 +55,10 @@ class PaginationTab(QWidget):
                 
             if not all_tags and self.db_path and os.path.exists(self.db_path):
                 try:
-                    conn = sqlite3.connect(self.db_path)
+                    conn = self.parent_dialog.shared_conn
                     cursor = conn.cursor()
                     cursor.execute("SELECT tag_name FROM Tags")
                     all_tags = [row[0] for row in cursor.fetchall() if row[0]]
-                    conn.close()
                 except Exception as e:
                     print(f"Failed to fetch tags independently: {e}")
                 
@@ -437,13 +436,12 @@ class PaginationTab(QWidget):
 
     def load_manga_data(self, manga_id):
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self.parent_dialog.shared_conn
             cursor = conn.cursor()
             
             cursor.execute("SELECT title FROM CustomMangas WHERE manga_id = ?", (manga_id,))
             row = cursor.fetchone()
             if not row:
-                conn.close()
                 return
             title = row[0]
             
@@ -453,7 +451,6 @@ class PaginationTab(QWidget):
             cursor.execute("SELECT image_path FROM CustomMangaPages WHERE manga_id = ? ORDER BY page_number ASC", (manga_id,))
             pages = [r[0] for r in cursor.fetchall()]
             
-            conn.close()
             
             self.clear_manga_state()
             self.loaded_manga_id = manga_id
@@ -489,7 +486,7 @@ class PaginationTab(QWidget):
         cover = self.selected_images[0]
         
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self.parent_dialog.shared_conn
             cursor = conn.cursor()
             
             if self.loaded_manga_id is None:
@@ -523,7 +520,6 @@ class PaginationTab(QWidget):
                 cursor.executemany("INSERT INTO CustomMangaTags (manga_id, tag_name) VALUES (?, ?)", tag_records)
                 
             conn.commit()
-            conn.close()
             
             if self.loaded_manga_id is None:
                 QMessageBox.information(self, "Success", f"Comic/Manga '{title}' created successfully!")

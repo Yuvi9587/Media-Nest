@@ -8,10 +8,10 @@ import uuid
 import traceback
 
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-                             QLineEdit, QPushButton, QGroupBox, QFileDialog, 
-                             QMessageBox, QTabWidget, QWidget, QComboBox, 
-                             QScrollArea, QProgressBar, QCheckBox, QSlider, 
-                             QFrame, QApplication, QSizePolicy, QInputDialog, 
+                             QLineEdit, QPushButton, QGroupBox, QFileDialog,
+                             QMessageBox, QTabWidget, QWidget, QComboBox,
+                             QScrollArea, QProgressBar, QCheckBox, QSlider,
+                             QFrame, QApplication, QSizePolicy, QInputDialog,
                              QGridLayout, QCompleter, QPlainTextEdit, QSplitter,
                              QTableWidget, QTableWidgetItem, QHeaderView,
                              QAbstractItemView, QListWidget, QListWidgetItem)
@@ -19,7 +19,7 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, QSettings, QStringList
 from PyQt6.QtGui import QPixmap, QImageReader, QImage, QIcon, QPainter, QShortcut, QKeySequence
 from PyQt6.QtMultimedia import QMediaPlayer
 
-from send2trash import send2trash  
+from send2trash import send2trash
 from Src.Logic.deduplication import DeduplicationWorker
 from Src.Logic.video_dedup import VideoDedupTab
 from Src.Logic.tags import TagManagerTab
@@ -27,7 +27,7 @@ from Src.Dialogs.setup_dialog import FirstTimeSetupDialog
 from Src.Logic.pagination_tab import PaginationTab
 from Src.Logic.db_repair import DbRepairTab
 class ThumbnailWorker(QThread):
-    thumb_ready = pyqtSignal(str, QImage, str, str) 
+    thumb_ready = pyqtSignal(str, QImage, str, str)
 
     def __init__(self, file_paths):
         super().__init__()
@@ -36,12 +36,12 @@ class ThumbnailWorker(QThread):
     def run(self):
         for path in self.file_paths:
             if not os.path.exists(path): continue
-            
+
             reader = QImageReader(path)
             orig_size = reader.size()
             res_text = f"{orig_size.width()}x{orig_size.height()}" if orig_size.isValid() else "Unknown"
             size_mb = f"{os.path.getsize(path) / (1024 * 1024):.2f}"
-            
+
             if orig_size.isValid():
                 reader.setScaledSize(orig_size.scaled(90, 90, Qt.AspectRatioMode.KeepAspectRatio))
                 img = reader.read()
@@ -49,9 +49,9 @@ class ThumbnailWorker(QThread):
                     self.thumb_ready.emit(path, img, res_text, size_mb)
 
 class FocusableClickableLabel(QLabel):
-    clicked = pyqtSignal(str) 
+    clicked = pyqtSignal(str)
     focused = pyqtSignal(str, QWidget)
-    
+
     def __init__(self, file_path, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.file_path = file_path
@@ -82,11 +82,11 @@ class ResizableImageLabel(QLabel):
         self._original_pixmap = None
         self._scaled_pixmap = None
         self._last_size = None
-        
+
     def setPixmap(self, pixmap):
         self._original_pixmap = pixmap
         self._scaled_pixmap = None
-        super().setPixmap(pixmap) # Set a base pixmap to give it a size hint if needed, though we override paint
+        super().setPixmap(pixmap)
         self.update()
 
     def resizeEvent(self, event):
@@ -117,21 +117,21 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.main_app = parent
         self.setWindowTitle("Media Nest Settings")
-        self.setMinimumWidth(1100) 
+        self.setMinimumWidth(1100)
         self.setMinimumHeight(700)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowMaximizeButtonHint | Qt.WindowType.WindowMinimizeButtonHint)
-        
+
         if getattr(sys, 'frozen', False):
             base_dir = os.path.dirname(sys.executable)
             self.asset_base_dir = getattr(sys, '_MEIPASS', os.path.abspath("."))
         else:
-            base_dir = os.path.abspath(".") 
+            base_dir = os.path.abspath(".")
             self.asset_base_dir = base_dir
-            
+
         self.config_path = os.path.join(base_dir, "config.json")
         self.current_db_folder = ""
-        self.current_ui_scale = "1.0" 
-        
+        self.current_ui_scale = "1.0"
+
         self.db_folder_changed = False
         self.ui_scale_changed = False
         self.dedupe_worker = None
@@ -140,13 +140,13 @@ class SettingsDialog(QDialog):
         self.current_preview_path = ""
         self.thumb_worker = None
         self.current_duplicate_groups = []
-        
+
         self.undo_stack = []
-        self.undo_trash_dir = "" 
-        self.auto_delete_mode = "safe" 
+        self.undo_trash_dir = ""
+        self.auto_delete_mode = "safe"
         self.skip_group_auto_delete_confirm = False
-        
-        self.thumb_labels_map = {} 
+
+        self.thumb_labels_map = {}
         self.nav_groups = []
 
         self.scale_map = {
@@ -162,12 +162,38 @@ class SettingsDialog(QDialog):
         }
         self.reverse_perf_map = {v: k for k, v in self.perf_map.items()}
 
+        self.shared_conn = None
+
         self.load_config()
+        self._open_shared_db()
         self.setup_ui()
+
+    def _open_shared_db(self):
+        db_folder = self.current_db_folder
+        if not db_folder:
+            db_folder = QSettings("MediaNest", "AppConfig").value("db_folder_path", "", type=str)
+        db_file = os.path.join(db_folder, "library.db") if db_folder else ""
+        if db_file and os.path.exists(db_file):
+            try:
+                self.shared_conn = sqlite3.connect(db_file, check_same_thread=False)
+                self.shared_conn.execute("PRAGMA journal_mode=WAL;")
+            except Exception as e:
+                print(f"[SettingsDialog] Failed to open shared DB: {e}")
+                self.shared_conn = None
+
+    def _close_shared_db(self):
+        if self.shared_conn:
+            try:
+                self.shared_conn.commit()
+                self.shared_conn.close()
+            except Exception:
+                pass
+            self.shared_conn = None
+
     def load_config(self):
-        
-        self.current_strictness = 0 
-        
+
+        self.current_strictness = 0
+
         settings = QSettings("MediaNest", "AppConfig")
         self.current_db_folder = settings.value("db_folder_path", "", type=str)
 
@@ -175,17 +201,17 @@ class SettingsDialog(QDialog):
             try:
                 with open(self.config_path, "r") as f:
                     config = json.load(f)
-                    
+
                     if not self.current_db_folder:
                         self.current_db_folder = config.get("db_folder", "")
-                        
+
                     self.current_ui_scale = config.get("ui_scale", "1.0")
                     try:
                         if float(self.current_ui_scale) < 0.4:
                             self.current_ui_scale = "0.4"
                     except (ValueError, TypeError):
                         pass
-                    self.current_strictness = config.get("dedupe_strictness", 0) 
+                    self.current_strictness = config.get("dedupe_strictness", 0)
                     self.current_perf_mode = config.get("performance_mode", "balanced")
             except Exception:
                 pass
@@ -196,20 +222,20 @@ class SettingsDialog(QDialog):
         self.tabs = QTabWidget()
         self.tab_database = QWidget()
         self.tab_interface = QWidget()
-        self.tab_dedupe = QWidget() 
-        
+        self.tab_dedupe = QWidget()
+
         self.tab_tag_manager = None
         self.tab_tag_placeholder = QWidget()
-        
+
         self.tab_video_dedup = None
         self.tab_video_placeholder = QWidget()
-        
+
         self.tab_pagination = None
         self.tab_pagination_placeholder = QWidget()
-        
+
         self.tabs.addTab(self.tab_database, "Database")
         self.tabs.addTab(self.tab_interface, "Interface")
-        self.tabs.addTab(self.tab_tag_placeholder, "Tag Manager") 
+        self.tabs.addTab(self.tab_tag_placeholder, "Tag Manager")
         self.tabs.currentChanged.connect(self.on_tab_changed)
         self.tabs.addTab(self.tab_dedupe, "Image Dedup")
         self.tabs.addTab(self.tab_video_placeholder, "Video Dedup")
@@ -243,11 +269,11 @@ class SettingsDialog(QDialog):
         ui_group = QGroupBox("Visual & Performance Settings")
         ui_inner_layout = QVBoxLayout()
         ui_inner_layout.setSpacing(15)
-        
+
         scale_row = QHBoxLayout()
         scale_row.addWidget(QLabel("Window UI Scale (Requires Restart):"))
         self.combo_scale = QComboBox()
-        
+
         current_text = self.reverse_scale_map.get(self.current_ui_scale)
         if not current_text:
             try:
@@ -256,18 +282,18 @@ class SettingsDialog(QDialog):
                 self.scale_map[current_text] = self.current_ui_scale
             except (ValueError, TypeError):
                 current_text = "100% (Default)"
-                
+
         self.combo_scale.addItems(list(self.scale_map.keys()))
         self.combo_scale.addItem("Custom...")
         self.combo_scale.setCurrentText(current_text)
-        
+
         self._last_scale_text = current_text
         self.combo_scale.currentTextChanged.connect(self.on_scale_changed)
-        
+
         scale_row.addWidget(self.combo_scale)
-        scale_row.addStretch() 
+        scale_row.addStretch()
         ui_inner_layout.addLayout(scale_row)
-        
+
         perf_row = QHBoxLayout()
         perf_row.addWidget(QLabel("Performance Mode:"))
         self.combo_perf = QComboBox()
@@ -277,7 +303,7 @@ class SettingsDialog(QDialog):
         perf_row.addWidget(self.combo_perf)
         perf_row.addStretch()
         ui_inner_layout.addLayout(perf_row)
-        
+
         ui_group.setLayout(ui_inner_layout)
         ui_layout.addWidget(ui_group)
         ui_layout.addStretch()
@@ -290,12 +316,12 @@ class SettingsDialog(QDialog):
         command_panel.setObjectName("CommandPanel")
         command_layout = QVBoxLayout(command_panel)
         command_layout.setContentsMargins(15, 15, 15, 15)
-        
+
         target_tag_row = QHBoxLayout()
         self.dedupe_target_tag_input = QLineEdit()
         self.dedupe_target_tag_input.setFixedHeight(36)
         self.dedupe_target_tag_input.setPlaceholderText("Target specific tag to scan (e.g. creator:example_name)...")
-        
+
         target_tag_row.addWidget(self.dedupe_target_tag_input)
         command_layout.addLayout(target_tag_row)
 
@@ -304,8 +330,8 @@ class SettingsDialog(QDialog):
         self.btn_scan_dupes = QPushButton("Scan Library")
         self.btn_scan_dupes.setFixedSize(140, 36)
         self.btn_scan_dupes.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_scan_dupes.clicked.connect(lambda: self.start_dedupe_scan(is_auto_rescan=False)) 
-        
+        self.btn_scan_dupes.clicked.connect(lambda: self.start_dedupe_scan(is_auto_rescan=False))
+
         self.btn_auto_delete = QPushButton("Auto-Delete Low Res")
         self.btn_auto_delete.setFixedSize(210, 36)
         self.btn_auto_delete.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -327,18 +353,18 @@ class SettingsDialog(QDialog):
         self.lbl_strictness = QLabel("Strictness: Exact Matches Only (0 diffs)")
         self.lbl_strictness.setFixedWidth(240)
         self.lbl_strictness.setStyleSheet("color: #a0a0a0; font-weight: bold;")
-        
+
         self.slider_strictness = QSlider(Qt.Orientation.Horizontal)
-        self.slider_strictness.setRange(0, 15) 
-        self.slider_strictness.setValue(self.current_strictness) 
+        self.slider_strictness.setRange(0, 15)
+        self.slider_strictness.setValue(self.current_strictness)
         self.slider_strictness.valueChanged.connect(self.update_strictness_label)
         self.slider_strictness.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.update_strictness_label(self.current_strictness) 
+        self.update_strictness_label(self.current_strictness)
 
         status_row.addWidget(self.lbl_strictness)
         status_row.addWidget(self.slider_strictness)
         status_row.addSpacing(30)
-        
+
         self.lbl_dedupe_status = QLabel("Ready to scan.")
         self.lbl_dedupe_status.setStyleSheet("color: #0e639c; font-weight: bold;")
         self.btn_undo = QPushButton("Undo Last Action")
@@ -346,12 +372,12 @@ class SettingsDialog(QDialog):
         self.btn_undo.setStyleSheet("QPushButton { background-color: transparent; border: 1px solid #d29922; color: #d29922; padding: 4px 10px; border-radius: 4px; font-weight: bold; font-size: 11px; } QPushButton:hover { background-color: rgba(210, 153, 34, 0.1); }")
         self.btn_undo.clicked.connect(self.undo_last_action)
         self.btn_undo.setVisible(False)
-        
+
         self.shortcut_undo = QShortcut(QKeySequence("Ctrl+Z"), self)
         self.shortcut_undo.activated.connect(self.undo_last_action)
-        
+
         status_row.addWidget(self.btn_undo)
-        
+
         status_row.addWidget(self.lbl_dedupe_status)
         status_row.addStretch()
 
@@ -370,17 +396,17 @@ class SettingsDialog(QDialog):
         self.dedupe_scroll.setWidgetResizable(True)
         self.dedupe_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.dedupe_scroll.setStyleSheet("QScrollArea { background-color: #1e1e1e; }")
-        self.dedupe_scroll.verticalScrollBar().setSingleStep(20) # Smoother mouse wheel scrolling
-        
+        self.dedupe_scroll.verticalScrollBar().setSingleStep(20)
+
         self.dedupe_content = QWidget()
         self.dedupe_content.setStyleSheet("QWidget { background-color: #1e1e1e; }")
         self.dedupe_content_layout = QVBoxLayout(self.dedupe_content)
         self.dedupe_content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.dedupe_content_layout.setSpacing(15) 
-        
+        self.dedupe_content_layout.setSpacing(15)
+
         self.dedupe_scroll.setWidget(self.dedupe_content)
         self.dedupe_scroll.verticalScrollBar().valueChanged.connect(self.on_dedupe_scroll)
-        content_split_layout.addWidget(self.dedupe_scroll, stretch=3) 
+        content_split_layout.addWidget(self.dedupe_scroll, stretch=3)
 
         self.preview_panel = QFrame()
         self.preview_panel.setObjectName("PreviewPanel")
@@ -395,7 +421,7 @@ class SettingsDialog(QDialog):
         self.preview_scroll = QScrollArea()
         self.preview_scroll.setWidgetResizable(True)
         self.preview_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        
+
         self.preview_scroll.setStyleSheet("""
             QScrollArea { background-color: transparent; border: none; }
             QScrollBar:vertical { background: #1e1e1e; width: 12px; }
@@ -405,7 +431,7 @@ class SettingsDialog(QDialog):
 
         self.preview_container = QWidget()
         self.preview_container.setStyleSheet("background-color: transparent;")
-        
+
         self.preview_container_layout = QVBoxLayout(self.preview_container)
         self.preview_container_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
         self.preview_container_layout.setSpacing(25)
@@ -427,15 +453,15 @@ class SettingsDialog(QDialog):
         self.btn_cancel = QPushButton("Cancel")
         self.btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_cancel.clicked.connect(self.reject)
-        
+
         self.btn_save = QPushButton("Save Settings")
         self.btn_save.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_save.clicked.connect(self.save_settings)
-        
+
         btn_layout.addWidget(self.btn_cancel)
         btn_layout.addWidget(self.btn_save)
         main_layout.addLayout(btn_layout)
-        
+
         self.apply_styles()
 
     def apply_styles(self):
@@ -453,7 +479,7 @@ class SettingsDialog(QDialog):
             QTabBar::tab { background: #252526; color: #a0a0a0; padding: 10px 25px; border: 1px solid #3e3e42; border-bottom: none; border-top-left-radius: 6px; border-top-right-radius: 6px; margin-right: 2px; font-weight: bold; font-size: 13px; }
             QTabBar::tab:selected { background: #1e1e1e; color: #ffffff; border-top: 3px solid #0e639c; }
             QScrollArea { border: 1px solid #3e3e42; background-color: #1e1e1e; }
-            QProgressBar { border: none; background-color: #1e1e1e; border-radius: 4px; } 
+            QProgressBar { border: none; background-color: #1e1e1e; border-radius: 4px; }
             QProgressBar::chunk { background-color: #0e639c; border-radius: 4px; }
         """)
         self.btn_save.setStyleSheet("QPushButton { background-color: #0e639c; color: white; } QPushButton:hover { background-color: #1177bb; }")
@@ -469,19 +495,19 @@ class SettingsDialog(QDialog):
     def on_scale_changed(self, text):
         if text == "Custom...":
             val, ok = QInputDialog.getInt(
-                self, 
-                "Custom UI Scale", 
-                "Enter UI Scale percentage (e.g. 74):", 
+                self,
+                "Custom UI Scale",
+                "Enter UI Scale percentage (e.g. 74):",
                 100, 40, 400, 1
             )
             if ok:
                 custom_scale_str = str(val / 100.0)
                 custom_text = f"{val}%"
-                
+
                 if custom_text not in self.scale_map:
                     self.scale_map[custom_text] = custom_scale_str
                     self.combo_scale.insertItem(self.combo_scale.count() - 1, custom_text)
-                
+
                 self.combo_scale.setCurrentText(custom_text)
                 self._last_scale_text = custom_text
             else:
@@ -501,7 +527,7 @@ class SettingsDialog(QDialog):
             return
 
         if event.key() in (Qt.Key.Key_Right, Qt.Key.Key_Left, Qt.Key.Key_Up, Qt.Key.Key_Down):
-            
+
             current_g, current_i = -1, -1
             for g_idx, group in enumerate(self.nav_groups):
                 if focus_widget in group:
@@ -528,20 +554,20 @@ class SettingsDialog(QDialog):
                 if not try_focus(current_g, current_i + 1):
                     try_focus(current_g + 1, 0)
                 event.accept()
-                
+
             elif event.key() == Qt.Key.Key_Left:
                 if not try_focus(current_g, current_i - 1):
                     if current_g > 0:
                         try_focus(current_g - 1, len(self.nav_groups[current_g - 1]) - 1)
                 event.accept()
-                
+
             elif event.key() == Qt.Key.Key_Down:
                 for next_g in range(current_g + 1, len(self.nav_groups)):
                     target_i = min(current_i, len(self.nav_groups[next_g]) - 1)
                     if try_focus(next_g, target_i):
                         break
                 event.accept()
-                
+
             elif event.key() == Qt.Key.Key_Up:
                 for prev_g in range(current_g - 1, -1, -1):
                     target_i = min(current_i, len(self.nav_groups[prev_g]) - 1)
@@ -558,30 +584,30 @@ class SettingsDialog(QDialog):
 
         for idx in range(self.dedupe_content_layout.count()):
             widget = self.dedupe_content_layout.itemAt(idx).widget()
-            
+
             if widget and widget.isVisible():
                 if widget.y() + (widget.height() * 0.4) > scroll_value:
-                    
+
                     group_idx = widget.property("group_index")
                     first_img = widget.property("first_image")
-                    
+
                     if first_img and getattr(self, 'active_preview_group', -1) != group_idx:
                         self.active_preview_group = group_idx
-                        
-                        # Debounce the heavy image loading so scrolling doesn't lag
+
+
                         if hasattr(self, '_preview_timer'):
                             self._preview_timer.stop()
                         else:
                             self._preview_timer = QTimer(self)
                             self._preview_timer.setSingleShot(True)
-                        
+
                         try:
                             self._preview_timer.timeout.disconnect()
                         except TypeError:
-                            pass # Not connected yet
-                            
+                            pass
+
                         self._preview_timer.timeout.connect(lambda p=first_img: self.show_preview(p))
-                        self._preview_timer.start(150) # Wait 150ms after scroll settles
+                        self._preview_timer.start(150)
                     break
 
     def on_thumbnail_focused(self, file_path, widget):
@@ -590,28 +616,28 @@ class SettingsDialog(QDialog):
         self.dedupe_scroll.ensureWidgetVisible(widget, 50, 100)
 
     def show_preview(self, file_path):
-        if not os.path.exists(file_path): 
+        if not os.path.exists(file_path):
             return
-            
+
         self.current_preview_path = file_path
-        
+
         target_group = None
         for group_data in self.current_duplicate_groups:
             items = group_data[0]
             if any(item['path'] == file_path for item in items):
                 target_group = items
                 break
-        
+
         if not target_group:
             target_group = [{'path': file_path}]
-            
+
         for i in reversed(range(self.preview_container_layout.count())):
             w = self.preview_container_layout.itemAt(i).widget()
-            if w: 
+            if w:
                 w.setParent(None)
                 w.deleteLater()
 
-        # Decide column count from aspect ratio
+
         COLS = 2
         if target_group:
             first_path = target_group[0]['path']
@@ -619,29 +645,29 @@ class SettingsDialog(QDialog):
                 reader = QImageReader(first_path)
                 orig_size = reader.size()
                 if orig_size.isValid() and orig_size.height() > orig_size.width():
-                    COLS = 3   # portrait → 3 per row
+                    COLS = 3
 
         import math
         num_rows   = math.ceil(len(target_group) / COLS)
         INFO_H     = 32
-        # Small group: ≤ 2 rows → old "fill the panel" expanding behaviour
-        # Large group: > 2 rows → fixed row height so row 3+ overflows → scroll
+
+
         USE_SCROLL = num_rows > 2
 
         if USE_SCROLL:
             panel_h = max(self.preview_panel.height(), 400)
-            row_h   = (panel_h - INFO_H - 8 * 3) // 2   # exactly 2 rows visible
+            row_h   = (panel_h - INFO_H - 8 * 3) // 2
             row_h   = max(row_h, 200)
 
         grid_widget = QWidget()
         if USE_SCROLL:
-            # Preferred height → grid takes natural (content-driven) size
-            # → overflows viewport → preview_scroll scrollbar appears
+
+
             grid_widget.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
             )
         else:
-            # Expanding height → grid fills the whole panel (original behaviour)
+
             grid_widget.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
             )
@@ -683,14 +709,14 @@ class SettingsDialog(QDialog):
             frame_layout.addWidget(lbl_img)
 
             if USE_SCROLL:
-                # Hard-lock each row to exactly row_h so rows don't compress
+
                 cell.setFixedHeight(row_h + INFO_H + 2)
                 frame_img.setFixedHeight(row_h)
                 frame_img.setSizePolicy(
                     QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
                 )
             else:
-                # Let frame fill whatever space the panel gives (original)
+
                 frame_img.setSizePolicy(
                     QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
                 )
@@ -714,26 +740,27 @@ class SettingsDialog(QDialog):
 
             grid.addWidget(cell, row, col)
             if not USE_SCROLL:
-                grid.setRowStretch(row, 1)   # fill mode: rows share panel height
-            grid.setColumnStretch(col, 1)    # always: columns share panel width
+                grid.setRowStretch(row, 1)
+            grid.setColumnStretch(col, 1)
 
         self.preview_container_layout.addWidget(grid_widget)
 
 
     def on_tab_changed(self, index):
+        self.stop_all_media()
         tab_name = self.tabs.tabText(index)
-        
+
         if tab_name in ["Tag Manager", "Image Dedup", "Video Dedup"]:
             settings = QSettings("MediaNest", "AppConfig")
-            
+
             if not settings.value("db_folder_path"):
                 setup_window = FirstTimeSetupDialog(self)
-                
+
                 if setup_window.exec() == QDialog.DialogCode.Accepted:
                     self.load_config()
                     self.db_path_input.setText(self.current_db_folder)
                 else:
-                    self.tabs.setCurrentIndex(1) 
+                    self.tabs.setCurrentIndex(1)
                     return
 
         if tab_name == "Tag Manager":
@@ -741,12 +768,12 @@ class SettingsDialog(QDialog):
                 self.tabs.setTabIcon(index, QIcon(os.path.join(self.asset_base_dir, "assets", "uisvg", "loading.svg")))
                 self.tabs.setTabText(index, "Loading...")
                 QApplication.processEvents()
-                
+
                 self.tab_tag_manager = TagManagerTab(self)
                 self.tabs.removeTab(index)
                 self.tabs.insertTab(index, self.tab_tag_manager, "Tag Manager")
                 self.tabs.setCurrentIndex(index)
-            
+
             QTimer.singleShot(20, self.tab_tag_manager.refresh_global_tags)
             QTimer.singleShot(20, self.tab_tag_manager.refresh_tagless_inbox)
 
@@ -758,7 +785,7 @@ class SettingsDialog(QDialog):
                 self.tabs.setTabIcon(index, QIcon(os.path.join(self.asset_base_dir, "assets", "uisvg", "loading.svg")))
                 self.tabs.setTabText(index, "Loading...")
                 QApplication.processEvents()
-                
+
                 self.tab_video_dedup = VideoDedupTab(self)
                 self.tabs.removeTab(index)
                 self.tabs.insertTab(index, self.tab_video_dedup, "Video Dedup")
@@ -769,7 +796,7 @@ class SettingsDialog(QDialog):
                 self.tabs.setTabIcon(index, QIcon(os.path.join(self.asset_base_dir, "assets", "uisvg", "loading.svg")))
                 self.tabs.setTabText(index, "Loading...")
                 QApplication.processEvents()
-                
+
                 self.tab_pagination = PaginationTab(self)
                 self.tabs.removeTab(index)
                 self.tabs.insertTab(index, self.tab_pagination, "Pagination")
@@ -777,13 +804,13 @@ class SettingsDialog(QDialog):
 
     def clear_preview(self):
         self.current_preview_path = ""
-        
+
         for i in reversed(range(self.preview_container_layout.count())):
             w = self.preview_container_layout.itemAt(i).widget()
-            if w: 
+            if w:
                 w.setParent(None)
                 w.deleteLater()
-            
+
         self.lbl_preview_placeholder = QLabel("Click an image to compare the group")
         self.lbl_preview_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_preview_placeholder.setStyleSheet("color: #666666; font-size: 14px;")
@@ -793,9 +820,9 @@ class SettingsDialog(QDialog):
     def _setup_dedupe_tag_completer(self):
         """Load tags directly from the DB and attach autocomplete to the target tag input."""
         if self.dedupe_target_tag_input.completer():
-            return  # Already set up
+            return
 
-        # Get db folder — from instance var or directly from QSettings
+
         db_folder = self.current_db_folder
         if not db_folder:
             db_folder = QSettings("MediaNest", "AppConfig").value("db_folder_path", "", type=str)
@@ -806,11 +833,12 @@ class SettingsDialog(QDialog):
             return
 
         try:
-            conn = sqlite3.connect(db_file)
+            conn = self.shared_conn or sqlite3.connect(db_file)
             cursor = conn.cursor()
-            cursor.execute("SELECT tag_name FROM Tags")  # column is 'tag_name'
+            cursor.execute("SELECT tag_name FROM Tags")
             all_tags = sorted(set(row[0] for row in cursor.fetchall() if row[0]))
-            conn.close()
+            if conn is not self.shared_conn:
+                conn.close()
         except Exception as e:
             print(f"[Dedup Autocomplete] Failed to load tags: {e}")
             return
@@ -848,12 +876,12 @@ class SettingsDialog(QDialog):
     def start_dedupe_scan(self, is_auto_rescan=False):
         if not is_auto_rescan: self.auto_delete_mode = "safe"
 
-        if not self.current_db_folder: 
+        if not self.current_db_folder:
             QMessageBox.warning(self, "No Database Folder", "Please select your 'Library Folder' in the Database tab first, then hit Save Settings!")
             return
 
         db_file = os.path.join(self.current_db_folder, "library.db")
-        if not os.path.exists(db_file): 
+        if not os.path.exists(db_file):
             QMessageBox.critical(self, "Database Missing", f"Could not find library.db at:\n\n{db_file}\n\nPlease check your folder path in the Database tab.")
             return
 
@@ -870,13 +898,13 @@ class SettingsDialog(QDialog):
         self.btn_scan_dupes.setText("Scanning...")
         self.pb_dedupe.setVisible(True)
         self.pb_dedupe.setValue(0)
-        
+
         self.btn_auto_delete.setEnabled(False)
         self.dedupe_search_bar.setEnabled(False)
-        self.clear_preview() 
+        self.clear_preview()
         self.thumb_labels_map.clear()
         self.nav_groups.clear()
-        
+
         self.render_queue = []
         for i in reversed(range(self.dedupe_content_layout.count())):
             w = self.dedupe_content_layout.itemAt(i).widget()
@@ -885,7 +913,7 @@ class SettingsDialog(QDialog):
         target_tag = self.dedupe_target_tag_input.text().strip()
         self.dedupe_worker = DeduplicationWorker(db_file, self.slider_strictness.value(), target_tag)
         self.dedupe_worker.progress_signal.connect(self.update_dedupe_progress)
-        self.dedupe_worker.status_signal.connect(self.handle_worker_status) 
+        self.dedupe_worker.status_signal.connect(self.handle_worker_status)
         self.dedupe_worker.duplicates_found.connect(self.render_duplicates_ui)
         self.dedupe_worker.finished_signal.connect(self.dedupe_finished)
         self.dedupe_worker.start()
@@ -907,7 +935,7 @@ class SettingsDialog(QDialog):
         self.pb_dedupe.setVisible(False)
 
     def render_duplicates_ui(self, duplicate_groups):
-        self.current_duplicate_groups = duplicate_groups 
+        self.current_duplicate_groups = duplicate_groups
 
         if not duplicate_groups:
             self.lbl_dedupe_status.setText("Library is clean! No duplicates found.")
@@ -924,15 +952,15 @@ class SettingsDialog(QDialog):
         self.pb_dedupe.setVisible(True)
         self.pb_dedupe.setMaximum(self.total_render_items)
         self.pb_dedupe.setValue(0)
-        
+
         all_paths = []
         for _, group_data in self.render_queue:
             for item in group_data[0]: all_paths.append(item['path'])
-            
+
         self.thumb_worker = ThumbnailWorker(all_paths)
         self.thumb_worker.thumb_ready.connect(self.apply_thumbnail)
         self.thumb_worker.start()
-        
+
         self.render_next_batch()
 
     def apply_thumbnail(self, path, qimage, res_text, size_mb):
@@ -942,13 +970,13 @@ class SettingsDialog(QDialog):
                 widgets['thumb'].setPixmap(QPixmap.fromImage(qimage))
                 widgets['info'].setText(f"{res_text}  |  {size_mb} MB")
             except RuntimeError:
-                pass # Widget has been deleted by user action (e.g. Auto Delete)
+                pass
 
     def render_next_batch(self):
         if not self.render_queue:
             self.lbl_dedupe_status.setText(f"Done! Displaying {self.total_render_items} duplicate groups.")
             self.pb_dedupe.setVisible(False)
-            
+
             self.on_dedupe_scroll(self.dedupe_scroll.verticalScrollBar().value())
             return
 
@@ -959,7 +987,7 @@ class SettingsDialog(QDialog):
         self.lbl_dedupe_status.setText(f"Loading images... {rendered_count} / {self.total_render_items}")
 
         group_card, nav_group_row = self.create_group_card(i, group_data)
-        
+
         if nav_group_row:
             self.nav_groups.append(nav_group_row)
 
@@ -967,19 +995,19 @@ class SettingsDialog(QDialog):
         QTimer.singleShot(5, self.render_next_batch)
 
     def create_group_card(self, i, group_data):
-        group_items, group_tags, avg_conf = group_data 
+        group_items, group_tags, avg_conf = group_data
 
         group_card = QFrame()
         group_card.setObjectName("GroupCard")
         group_card.setProperty("search_tags", group_tags)
-        group_card.setProperty("group_index", i) 
+        group_card.setProperty("group_index", i)
         group_card.setProperty("first_image", group_items[0]['path'])
         group_card.setStyleSheet("#GroupCard { background-color: #2d2d30; border-radius: 8px; border: 1px solid #3e3e42; }")
-        
+
         card_main_layout = QVBoxLayout(group_card)
         card_main_layout.setContentsMargins(15, 15, 15, 15)
 
-        # ── Title row ──────────────────────────────────────────
+
         header_layout = QHBoxLayout()
 
         lbl_title = QLabel(f"Duplicate Group #{i+1}")
@@ -1001,7 +1029,7 @@ class SettingsDialog(QDialog):
         header_layout.addStretch()
         card_main_layout.addLayout(header_layout)
 
-        # ── Action buttons row (always full width, never clipped) ──
+
         btn_auto_del = QPushButton("Auto Delete")
         btn_auto_del.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_auto_del.setStyleSheet(
@@ -1034,7 +1062,7 @@ class SettingsDialog(QDialog):
         btn_row.addStretch()
         card_main_layout.addLayout(btn_row)
 
-        # ── Divider ────────────────────────────────────────────
+
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setStyleSheet("background-color: #3e3e42;")
@@ -1047,7 +1075,7 @@ class SettingsDialog(QDialog):
         nav_group_row = []
         USE_SCROLL = len(group_items) > 4
 
-        # ── Build each thumbnail item widget ──────────────────────
+
         item_widgets = []
         for idx, item in enumerate(group_items):
             file_path = item['path']
@@ -1109,18 +1137,18 @@ class SettingsDialog(QDialog):
             item_layout.addWidget(btn_del)
             item_widgets.append((idx, item_widget))
 
-        # ── Assemble into grid or scrollable strip ─────────────────
-        if USE_SCROLL:
-            # Heights: thumb=90, checkbox=22, name=28, info=18, btn=28,
-            #          spacing(4×4)=16, margins(5+5)=10 → ~212px per item
-            ITEM_H    = 220   # fixed height per card (8px headroom)
-            STRIP_H   = ITEM_H + 12   # + 6px top + 6px bottom padding
-            SA_H      = STRIP_H + 18  # + scrollbar (10px) + border (2×4px)
-            ITEM_W    = 110
-            ITEM_STEP = ITEM_W + 6    # width + spacing between items
-            STRIP_W   = len(item_widgets) * ITEM_STEP + 12  # + left+right padding
 
-            # Fix every item card to the same size so nothing overflows
+        if USE_SCROLL:
+
+
+            ITEM_H    = 220
+            STRIP_H   = ITEM_H + 12
+            SA_H      = STRIP_H + 18
+            ITEM_W    = 110
+            ITEM_STEP = ITEM_W + 6
+            STRIP_W   = len(item_widgets) * ITEM_STEP + 12
+
+
             for _, w in item_widgets:
                 w.setFixedSize(ITEM_W, ITEM_H)
 
@@ -1138,7 +1166,7 @@ class SettingsDialog(QDialog):
                 strip_layout.addWidget(w)
 
             scroll_area = QScrollArea()
-            scroll_area.setWidgetResizable(False)   # we control sizes explicitly
+            scroll_area.setWidgetResizable(False)
             scroll_area.setWidget(strip_widget)
             scroll_area.setHorizontalScrollBarPolicy(
                 Qt.ScrollBarPolicy.ScrollBarAsNeeded
@@ -1146,8 +1174,8 @@ class SettingsDialog(QDialog):
             scroll_area.setVerticalScrollBarPolicy(
                 Qt.ScrollBarPolicy.ScrollBarAlwaysOff
             )
-            # Hard-lock the scroll area height so the parent QVBoxLayout
-            # cannot expand it (Fixed policy beats Expanding)
+
+
             scroll_area.setFixedHeight(SA_H)
             scroll_area.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
@@ -1184,7 +1212,7 @@ class SettingsDialog(QDialog):
             card_main_layout.addWidget(scroll_area)
 
         else:
-            # Normal 3-column grid for ≤ 4 items
+
             group_images_grid = QGridLayout()
             group_images_grid.setSpacing(10)
 
@@ -1194,11 +1222,11 @@ class SettingsDialog(QDialog):
 
             card_main_layout.addLayout(group_images_grid)
 
-        
+
         btn_ignore.clicked.connect(lambda checked, gc=group_card, gd=group_data, cbs=checkbox_refs: self.mark_not_duplicates(gc, gd, cbs))
         btn_delete_all.clicked.connect(lambda checked, gc=group_card, gd=group_data: self.delete_all_duplicates(gc, gd))
         btn_auto_del.clicked.connect(lambda checked, gc=group_card, gd=group_data, cbs=checkbox_refs: self.auto_delete_group(gc, gd, cbs))
-        
+
         return group_card, nav_group_row
 
     def push_undo_action(self, snapshot):
@@ -1212,20 +1240,19 @@ class SettingsDialog(QDialog):
                             send2trash(f['trash_path'])
                     except Exception as e:
                         print(f"Failed to send to trash from undo stack: {e}")
-        
+
         self.btn_undo.setVisible(True)
         self.btn_undo.setText(f"Undo Last Action ({len(self.undo_stack)})")
 
     def undo_last_action(self):
         if not self.undo_stack:
             return
-            
+
         snapshot = self.undo_stack.pop()
-        
-        db_file = os.path.join(self.current_db_folder, "library.db")
-        conn = sqlite3.connect(db_file)
+
+        conn = self.shared_conn
         cursor = conn.cursor()
-        
+
         if snapshot['type'] == 'delete':
             for f in snapshot['files']:
                 if os.path.exists(f['trash_path']):
@@ -1240,63 +1267,62 @@ class SettingsDialog(QDialog):
         elif snapshot['type'] == 'ignore':
             for h1, h2 in snapshot['ignored_pairs']:
                 cursor.execute("DELETE FROM IgnoredPairs WHERE (hash1 = ? AND hash2 = ?) OR (hash1 = ? AND hash2 = ?)", (h1, h2, h2, h1))
-        
+
         conn.commit()
-        conn.close()
-        
+
         card_index = snapshot['card_index']
         group_data = snapshot['group_data_snapshot']
         group_card_ref = snapshot.get('group_card_ref')
-        
+
         if not snapshot.get('is_group_removed', True):
             if group_card_ref:
                 group_card_ref.setParent(None)
                 group_card_ref.deleteLater()
                 if snapshot['current_group_data'] in self.current_duplicate_groups:
                     self.current_duplicate_groups.remove(snapshot['current_group_data'])
-        
+
         if group_data not in self.current_duplicate_groups:
             self.current_duplicate_groups.insert(card_index, group_data)
-            
+
         new_card, nav_group = self.create_group_card(card_index, group_data)
-        
+
         if nav_group:
             self.nav_groups.insert(card_index, nav_group)
-            
+
         self.dedupe_content_layout.insertWidget(card_index, new_card)
-        
+
         if not self.undo_stack:
             self.btn_undo.setVisible(False)
         else:
             self.btn_undo.setText(f"Undo Last Action ({len(self.undo_stack)})")
-            
+
         self.lbl_dedupe_status.setText("Action undone successfully.")
 
     def remove_group_and_select_next(self, group_card):
         self.dedupe_scroll.setFocus()
         scroll_bar = self.dedupe_scroll.verticalScrollBar()
         current_scroll = scroll_bar.value()
-        
+
         is_previewed = (group_card.property("group_index") == getattr(self, 'active_preview_group', -1))
         index = self.dedupe_content_layout.indexOf(group_card)
-        
+
         group_card.setParent(None)
         group_card.deleteLater()
-        
+
         QTimer.singleShot(0, lambda: scroll_bar.setValue(current_scroll))
-        
+
         if is_previewed:
             self.clear_preview()
-            
+
             next_widget = None
             if index < self.dedupe_content_layout.count():
                 item = self.dedupe_content_layout.itemAt(index)
                 if item: next_widget = item.widget()
-            
+
             if not next_widget and index - 1 >= 0:
                 item = self.dedupe_content_layout.itemAt(index - 1)
                 if item: next_widget = item.widget()
-                
+
             if next_widget:
                 first_img = next_widget.property("first_image")
                 group_idx = next_widget.property("group_index")
@@ -1306,11 +1332,10 @@ class SettingsDialog(QDialog):
 
     def mark_not_duplicates(self, group_card, group_data, checkboxes):
         group_items = group_data[0]
-        
-        db_file = os.path.join(self.current_db_folder, "library.db")
-        conn = sqlite3.connect(db_file)
+
+        conn = self.shared_conn
         cursor = conn.cursor()
-        
+
         all_hashes = [item['hash'] for item in group_items]
         pairs_to_ignore = []
 
@@ -1321,7 +1346,7 @@ class SettingsDialog(QDialog):
                     if cb.isChecked() and cb.isVisible():
                         selected_hashes.append(cb.property("hash_val"))
                 except RuntimeError:
-                    continue 
+                    continue
 
         if not selected_hashes:
             for i in range(len(all_hashes)):
@@ -1332,27 +1357,26 @@ class SettingsDialog(QDialog):
                 for other in all_hashes:
                     if selected != other:
                         pairs_to_ignore.append(tuple(sorted((selected, other))))
-        
+
         for h1, h2 in set(pairs_to_ignore):
             cursor.execute("INSERT OR IGNORE INTO IgnoredPairs (hash1, hash2) VALUES (?, ?)", (h1, h2))
-            
+
         conn.commit()
-        conn.close()
-        
+
         snapshot_group_data = copy.deepcopy(group_data)
         card_index = self.dedupe_content_layout.indexOf(group_card)
-        
+
         if 'selected_hashes' in locals() and selected_hashes:
             remaining_items = [item for item in group_items if item['hash'] not in selected_hashes]
             if len(remaining_items) >= 2:
-                # Modify in place so the tuple reference remains intact
+
                 group_items.clear()
                 group_items.extend(remaining_items)
-                
+
                 self.dedupe_scroll.setFocus()
                 scroll_bar = self.dedupe_scroll.verticalScrollBar()
                 current_scroll = scroll_bar.value()
-                
+
                 for cb in checkboxes:
                     try:
                         if cb.isChecked() and cb.isVisible() and hasattr(cb, 'item_widget'):
@@ -1363,15 +1387,15 @@ class SettingsDialog(QDialog):
                             cb.setVisible(False)
                     except RuntimeError:
                         pass
-                
+
                 QTimer.singleShot(0, lambda: scroll_bar.setValue(current_scroll))
-                
+
                 is_previewed = (group_card.property("group_index") == getattr(self, 'active_preview_group', -1))
                 if is_previewed:
                     self.clear_preview()
                     if len(group_items) > 0:
                         self.show_preview(group_items[0]['path'])
-                    
+
                 self.push_undo_action({
                     'type': 'ignore',
                     'ignored_pairs': set(pairs_to_ignore),
@@ -1380,14 +1404,14 @@ class SettingsDialog(QDialog):
                     'is_group_removed': False,
                     'group_card_ref': group_card
                 })
-                
+
                 return
-        
+
         if group_data in self.current_duplicate_groups:
             self.current_duplicate_groups.remove(group_data)
-        
+
         self.remove_group_and_select_next(group_card)
-        
+
         self.push_undo_action({
             'type': 'ignore',
             'ignored_pairs': set(pairs_to_ignore),
@@ -1399,7 +1423,7 @@ class SettingsDialog(QDialog):
 
     def auto_delete_group(self, group_card, group_data, checkboxes=None):
         group_items = group_data[0]
-        
+
         checked_hashes = set()
         if checkboxes:
             for cb in checkboxes:
@@ -1408,7 +1432,7 @@ class SettingsDialog(QDialog):
                         checked_hashes.add(cb.property("hash_val"))
                 except RuntimeError:
                     continue
-        
+
         best_file = None
         best_score = -1
 
@@ -1422,10 +1446,10 @@ class SettingsDialog(QDialog):
         for item in group_items:
             if item['hash'] in checked_hashes:
                 continue
-                
+
             path = item['path']
             if not os.path.exists(path): continue
-            
+
             size = QImageReader(path).size()
             res_score = (size.width() * size.height()) if size.isValid() else 0
 
@@ -1459,10 +1483,10 @@ class SettingsDialog(QDialog):
             msgBox.setWindowTitle("Confirm Auto Delete")
             msgBox.setText(f"Found {len(files_to_delete)} lower quality duplicate(s) in this group.\n\nAre you sure you want to move them to the Recycle Bin?")
             msgBox.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            
+
             cb = QCheckBox("Don't ask again in this session")
             msgBox.setCheckBox(cb)
-            
+
             reply = msgBox.exec()
             if reply == QMessageBox.StandardButton.Yes:
                 proceed = True
@@ -1472,13 +1496,12 @@ class SettingsDialog(QDialog):
         if proceed:
             snapshot_group_data = copy.deepcopy(group_data)
             card_index = self.dedupe_content_layout.indexOf(group_card)
-            
-            db_file = os.path.join(self.current_db_folder, "library.db")
-            conn = sqlite3.connect(db_file)
+
+            conn = self.shared_conn
             cursor = conn.cursor()
-            
+
             deleted_files_info = []
-            
+
             for path in files_to_delete:
                 cursor.execute("SELECT * FROM Images WHERE file_path = ?", (path,))
                 row = cursor.fetchone()
@@ -1492,15 +1515,14 @@ class SettingsDialog(QDialog):
                         cursor.execute("DELETE FROM Images WHERE file_path = ?", (path,))
                     except Exception as e:
                         print(f"Failed to move {path} to undo trash: {e}")
-            
+
             conn.commit()
-            conn.close()
-            
+
             if group_data in self.current_duplicate_groups:
                 self.current_duplicate_groups.remove(group_data)
-            
+
             self.remove_group_and_select_next(group_card)
-            
+
             self.push_undo_action({
                 'type': 'delete',
                 'files': deleted_files_info,
@@ -1533,8 +1555,8 @@ class SettingsDialog(QDialog):
             return extension_scores.get(ext, 0)
 
         for group_data in self.current_duplicate_groups:
-            group_items, _, _ = group_data 
-            
+            group_items, _, _ = group_data
+
             if self.auto_delete_mode == "safe":
                 resolutions = set()
                 for item in group_items:
@@ -1542,8 +1564,8 @@ class SettingsDialog(QDialog):
                     if os.path.exists(path):
                         size = QImageReader(path).size()
                         if size.isValid(): resolutions.add(f"{size.width()}x{size.height()}")
-                
-                if len(resolutions) == 1: continue 
+
+                if len(resolutions) == 1: continue
 
                 best_file = None
                 best_score = -1
@@ -1551,7 +1573,7 @@ class SettingsDialog(QDialog):
                 for item in group_items:
                     path = item['path']
                     if not os.path.exists(path): continue
-                    
+
                     size = QImageReader(path).size()
                     score = (size.width() * size.height()) if size.isValid() else 0
 
@@ -1576,7 +1598,7 @@ class SettingsDialog(QDialog):
                 for item in group_items:
                     path = item['path']
                     if not os.path.exists(path): continue
-                    
+
                     file_size = os.path.getsize(path)
                     ext_score = get_image_score(path)
 
@@ -1602,7 +1624,7 @@ class SettingsDialog(QDialog):
 
         if reply == QMessageBox.StandardButton.Yes:
             self.is_global_delete = True
-            self.clear_preview() 
+            self.clear_preview()
             self.delete_queue = files_to_delete
             self.total_to_delete = len(files_to_delete)
             self.deleted_count = 0
@@ -1611,25 +1633,23 @@ class SettingsDialog(QDialog):
             self.pb_dedupe.setVisible(True)
             self.pb_dedupe.setMaximum(self.total_to_delete)
             self.pb_dedupe.setValue(0)
-            
-            db_file = os.path.join(self.current_db_folder, "library.db")
-            self.delete_conn = sqlite3.connect(db_file)
+
+            self.delete_conn = self.shared_conn
             self.delete_cursor = self.delete_conn.cursor()
             self.process_delete_batch()
 
     def process_delete_batch(self):
         if not self.delete_queue:
             self.delete_conn.commit()
-            self.delete_conn.close()
             self.pb_dedupe.setVisible(False)
-            
+
             if not getattr(self, 'skip_group_auto_delete_confirm', False) and getattr(self, 'is_global_delete', False):
                 QMessageBox.information(self, "Success", f"Moved {self.deleted_count} files to the Recycle Bin!")
-            
+
             if getattr(self, 'is_global_delete', False):
                 if self.auto_delete_mode == "safe": self.auto_delete_mode = "aggressive"
-                else: self.auto_delete_mode = "safe" 
-                self.start_dedupe_scan(is_auto_rescan=True) 
+                else: self.auto_delete_mode = "safe"
+                self.start_dedupe_scan(is_auto_rescan=True)
             return
 
         chunk = self.delete_queue[:10]
@@ -1637,7 +1657,7 @@ class SettingsDialog(QDialog):
 
         for path in chunk:
             try:
-                if os.path.exists(path): send2trash(path) 
+                if os.path.exists(path): send2trash(path)
                 self.delete_cursor.execute("DELETE FROM Images WHERE file_path = ?", (path,))
                 self.deleted_count += 1
             except Exception:
@@ -1653,15 +1673,14 @@ class SettingsDialog(QDialog):
             try:
                 snapshot_group_data = copy.deepcopy(group_data) if group_data else None
                 card_index = self.dedupe_content_layout.indexOf(group_card) if group_card else -1
-                
-                db_file = os.path.join(self.current_db_folder, "library.db")
-                conn = sqlite3.connect(db_file)
+
+                conn = self.shared_conn
                 cursor = conn.cursor()
-                
+
                 deleted_files_info = []
                 cursor.execute("SELECT * FROM Images WHERE file_path = ?", (file_path,))
                 row = cursor.fetchone()
-                
+
                 if row and os.path.exists(file_path):
                     trash_path = os.path.join(self.undo_trash_dir, str(uuid.uuid4()) + os.path.splitext(file_path)[1])
                     shutil.move(file_path, trash_path)
@@ -1669,37 +1688,36 @@ class SettingsDialog(QDialog):
                         'original_path': file_path, 'trash_path': trash_path, 'db_row': row
                     })
                     cursor.execute("DELETE FROM Images WHERE file_path = ?", (file_path,))
-                    
+
                 conn.commit()
-                conn.close()
-                
+
                 is_previewed = group_card and (group_card.property("group_index") == getattr(self, 'active_preview_group', -1))
                 if is_previewed:
                     self.clear_preview()
-                
+
                 self.dedupe_scroll.setFocus()
                 scroll_bar = self.dedupe_scroll.verticalScrollBar()
                 current_scroll = scroll_bar.value()
-                
+
                 widget_to_remove.setParent(None)
                 widget_to_remove.deleteLater()
-                
+
                 QTimer.singleShot(0, lambda: scroll_bar.setValue(current_scroll))
-                
+
                 group_will_be_removed = False
-                
+
                 if group_data:
                     items_to_keep = [item for item in group_data[0] if item['path'] != file_path]
                     group_data[0].clear()
                     group_data[0].extend(items_to_keep)
-                    
+
                     if len(group_data[0]) <= 2 and checkbox_refs:
                         for cb in checkbox_refs:
                             try:
                                 cb.setVisible(False)
                             except RuntimeError:
                                 pass
-                                
+
                     if len(group_data[0]) < 2 and group_card:
                         group_will_be_removed = True
                         if group_data in self.current_duplicate_groups:
@@ -1707,7 +1725,7 @@ class SettingsDialog(QDialog):
                         self.remove_group_and_select_next(group_card)
                     elif is_previewed and len(group_data[0]) > 0:
                         self.show_preview(group_data[0][0]['path'])
-                
+
                 if snapshot_group_data:
                     self.push_undo_action({
                         'type': 'delete',
@@ -1717,31 +1735,30 @@ class SettingsDialog(QDialog):
                         'is_group_removed': group_will_be_removed,
                         'group_card_ref': group_card
                     })
-                        
+
             except Exception as e:
                 print(f"Delete duplicate error: {e}")
 
     def delete_all_duplicates(self, group_card, group_data):
         group_items = group_data[0]
-        
+
         reply = QMessageBox.question(
-            self, 
-            "Confirm Delete All", 
-            f"Are you sure you want to move ALL {len(group_items)} images in this group to the Recycle Bin?", 
+            self,
+            "Confirm Delete All",
+            f"Are you sure you want to move ALL {len(group_items)} images in this group to the Recycle Bin?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-        
+
         if reply == QMessageBox.StandardButton.Yes:
             snapshot_group_data = copy.deepcopy(group_data)
             card_index = self.dedupe_content_layout.indexOf(group_card)
-            
-            db_file = os.path.join(self.current_db_folder, "library.db")
-            conn = sqlite3.connect(db_file)
+
+            conn = self.shared_conn
             cursor = conn.cursor()
-            
+
             paths_to_delete = [item['path'] for item in group_items]
             deleted_files_info = []
-            
+
             for path in paths_to_delete:
                 try:
                     cursor.execute("SELECT * FROM Images WHERE file_path = ?", (path,))
@@ -1755,15 +1772,14 @@ class SettingsDialog(QDialog):
                         cursor.execute("DELETE FROM Images WHERE file_path = ?", (path,))
                 except Exception as e:
                     print(f"Failed to delete {path}: {e}")
-                    
+
             conn.commit()
-            conn.close()
-                
+
             if group_data in self.current_duplicate_groups:
                 self.current_duplicate_groups.remove(group_data)
-                
+
             self.remove_group_and_select_next(group_card)
-            
+
             self.push_undo_action({
                 'type': 'delete',
                 'files': deleted_files_info,
@@ -1778,15 +1794,15 @@ class SettingsDialog(QDialog):
         if folder: self.db_path_input.setText(os.path.normpath(folder))
 
     def save_settings(self):
-        
+
         new_folder = self.db_path_input.text().strip()
         scale_text = self.combo_scale.currentText()
         if scale_text == "Custom...":
             scale_text = getattr(self, '_last_scale_text', "100% (Default)")
         new_scale_val = self.scale_map.get(scale_text, "1.0")
-        new_strictness = self.slider_strictness.value() 
+        new_strictness = self.slider_strictness.value()
         config_changed = False
-        
+
         settings = QSettings("MediaNest", "AppConfig")
         if new_folder:
             settings.setValue("db_folder_path", new_folder)
@@ -1797,33 +1813,33 @@ class SettingsDialog(QDialog):
             config = {}
             if os.path.exists(self.config_path):
                 try:
-                    with open(self.config_path, "r") as f: 
+                    with open(self.config_path, "r") as f:
                         config = json.load(f)
                 except json.JSONDecodeError:
                     config = {}
-            
+
             if new_folder != self.current_db_folder:
                 config["db_folder"] = new_folder
-                self.current_db_folder = new_folder 
+                self.current_db_folder = new_folder
                 config_changed = True
 
             if new_scale_val != self.current_ui_scale:
                 config["ui_scale"] = new_scale_val
                 self.ui_scale_changed = True
                 config_changed = True
-                
+
                 QMessageBox.information(
-                    self, 
-                    "Restart Required", 
+                    self,
+                    "Restart Required",
                     "You have changed the UI Scale.\n\nPlease restart Media Nest for the new scaling to take effect!"
                 )
-                
+
             new_perf_val = self.perf_map[self.combo_perf.currentText()]
             if new_perf_val != self.current_perf_mode:
                 config["performance_mode"] = new_perf_val
                 self.current_perf_mode = new_perf_val
                 config_changed = True
-                
+
             if new_strictness != config.get("dedupe_strictness", 0):
                 config["dedupe_strictness"] = new_strictness
                 config_changed = True
@@ -1831,22 +1847,22 @@ class SettingsDialog(QDialog):
             if new_strictness != config.get("dedupe_strictness", 0):
                 config["dedupe_strictness"] = new_strictness
                 config_changed = True
-                
+
             if config_changed:
-                with open(self.config_path, "w") as f: 
+                with open(self.config_path, "w") as f:
                     json.dump(config, f, indent=4)
-                    
+
         except Exception as e:
             error_msg = f"Failed to save settings to:\n{self.config_path}\n\nError: {e}"
             QMessageBox.critical(self, "Save Error", error_msg)
             print(traceback.format_exc())
             return
-            
+
         self.accept()
 
     def stop_all_media(self):
         """Scans the entire dialog for running media players and explicitly kills them."""
-        
+
         players = self.findChildren(QMediaPlayer)
         for player in players:
             player.stop()
@@ -1855,7 +1871,7 @@ class SettingsDialog(QDialog):
     def flush_undo_trash(self):
         if not hasattr(self, 'undo_trash_dir') or not self.undo_trash_dir:
             return
-            
+
         if os.path.exists(self.undo_trash_dir):
             for root, dirs, files in os.walk(self.undo_trash_dir):
                 for f in files:
@@ -1867,14 +1883,17 @@ class SettingsDialog(QDialog):
     def closeEvent(self, event):
         self.stop_all_media()
         self.flush_undo_trash()
+        self._close_shared_db()
         super().closeEvent(event)
 
     def reject(self):
         self.stop_all_media()
         self.flush_undo_trash()
+        self._close_shared_db()
         super().reject()
 
     def accept(self):
         self.stop_all_media()
         self.flush_undo_trash()
+        self._close_shared_db()
         super().accept()

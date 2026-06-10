@@ -21,6 +21,7 @@ class DeduplicationWorker(QThread):
     def run(self):
         try:
             conn = sqlite3.connect(self.db_path)
+            conn.execute("PRAGMA journal_mode=WAL;")
             cursor = conn.cursor()
 
             try:

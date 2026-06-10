@@ -63,7 +63,10 @@ class GallerySection(QWidget):
         """)
 
         self.filter_combo = QComboBox()
-        self.filter_combo.addItems(["All", "Images", "Videos"])
+        self.filter_combo.addItem("All")
+        ui_svg_dir = os.path.join(self.asset_dir, "uisvg")
+        self.filter_combo.addItem(QIcon(os.path.join(ui_svg_dir, "image.svg")), "Images")
+        self.filter_combo.addItem(QIcon(os.path.join(ui_svg_dir, "video.svg")), "Videos")
         self.filter_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         self.filter_combo.setStyleSheet("""
             QComboBox { 
