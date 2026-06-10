@@ -3,9 +3,11 @@ import bisect
 import re
 from collections import OrderedDict
 
-from PyQt6.QtCore import Qt, QRect, QSize, QRunnable, QThreadPool, pyqtSignal, QObject, QTimer
-from PyQt6.QtGui import QPainter, QPixmap, QColor, QImageReader
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QLabel, QSizePolicy
+from PyQt6.QtCore import Qt, QRect, QSize, QRunnable, QThreadPool, pyqtSignal, QObject, QTimer, QPoint
+from PyQt6.QtGui import QPainter, QPixmap, QColor, QImageReader, QCursor, QShortcut, QKeySequence
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QLabel, QSizePolicy, QApplication
+from PyQt6.QtSvg import QSvgRenderer
+from Src.Logic.paths import resource_path
 
 def natural_key(text):
     return [int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", text)]
@@ -59,6 +61,19 @@ class ManhwaReaderWidget(QWidget):
         self.viewport_width = 1000
         self.current_target_width = 1000
         self.setMinimumWidth(self.viewport_width)
+
+        # Autoscroll state
+        self._autoscroll_active = False
+        self._autoscroll_global_origin = None
+        self._autoscroll_viewport_origin = None
+        self._autoscroll_timer = QTimer(self)
+        self._autoscroll_timer.timeout.connect(self._do_autoscroll)
+        self.setMouseTracking(True)
+        
+        try:
+            self.autoscroll_renderer = QSvgRenderer(resource_path(os.path.join("assets", "uisvg", "autoscroll.svg")))
+        except Exception:
+            self.autoscroll_renderer = None
 
     def set_zoom(self, percentage):
         self.zoom_factor = percentage / 100.0
@@ -162,6 +177,53 @@ class ManhwaReaderWidget(QWidget):
         self.load_visible_images()
         self.update()
 
+    def _do_autoscroll(self):
+        if not self._autoscroll_active: return
+        
+        current_global = QCursor.pos()
+        dy = current_global.y() - self._autoscroll_global_origin.y()
+        
+        if abs(dy) < 15: return
+        
+        speed = (abs(dy) - 15) * 0.15
+        if speed > 60: speed = 60
+        if dy < 0: speed = -speed
+        
+        scrollbar = self.scroll_area.verticalScrollBar()
+        scrollbar.setValue(int(scrollbar.value() + speed))
+        self.update()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.MiddleButton:
+            if not self._autoscroll_active:
+                self._autoscroll_active = True
+                self._autoscroll_global_origin = event.globalPosition().toPoint()
+                self._autoscroll_viewport_origin = self.scroll_area.viewport().mapFromGlobal(self._autoscroll_global_origin)
+                self._autoscroll_timer.start(16)
+                
+                # Replace cursor with the SVG
+                if self.autoscroll_renderer:
+                    pm = QPixmap(32, 32)
+                    pm.fill(Qt.GlobalColor.transparent)
+                    painter = QPainter(pm)
+                    self.autoscroll_renderer.render(painter)
+                    painter.end()
+                    self.setCursor(QCursor(pm, 16, 16))
+            else:
+                self._autoscroll_active = False
+                self._autoscroll_timer.stop()
+                self.unsetCursor()
+            self.update()
+            event.accept()
+        elif self._autoscroll_active:
+            self._autoscroll_active = False
+            self._autoscroll_timer.stop()
+            self.unsetCursor()
+            self.update()
+            super().mousePressEvent(event)
+        else:
+            super().mousePressEvent(event)
+
     def paintEvent(self, event):
         painter = QPainter(self)
         
@@ -219,7 +281,6 @@ class ReaderImageLabel(QLabel):
         self._single_click_timer.timeout.connect(self._on_single_click)
         self._last_click_pos = None
         
-        from PyQt6.QtGui import QShortcut, QKeySequence
         self.shortcut_zoom_in_1 = QShortcut(QKeySequence("Ctrl++"), self)
         self.shortcut_zoom_in_1.activated.connect(self.zoom_in_keyboard)
         self.shortcut_zoom_in_2 = QShortcut(QKeySequence("Ctrl+="), self)
@@ -231,9 +292,6 @@ class ReaderImageLabel(QLabel):
         self.update_cursor()
 
     def update_cursor(self):
-        from PyQt6.QtGui import QCursor, QPixmap
-        import os
-        from Src.Logic.paths import resource_path
         if self.is_zoomed:
             pm = QPixmap(resource_path(os.path.join("assets", "uisvg", "zoom_out.svg")))
             self.setCursor(QCursor(pm))
@@ -281,7 +339,6 @@ class ReaderImageLabel(QLabel):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._last_click_pos = event.position()
-            from PyQt6.QtWidgets import QApplication
             self._single_click_timer.start(QApplication.doubleClickInterval())
 
     def _on_single_click(self):
@@ -336,7 +393,6 @@ class ReaderImageLabel(QLabel):
             super().setPixmap(self._raw_pixmap)
             
             def apply_scroll():
-                from PyQt6.QtCore import QPoint
                 content_widget = scroll_area.widget()
                 if not content_widget:
                     return
@@ -355,7 +411,6 @@ class ReaderImageLabel(QLabel):
                 scroll_area.horizontalScrollBar().setValue(int(target_pt.x() - viewport_w / 2.0))
                 scroll_area.verticalScrollBar().setValue(int(target_pt.y() - viewport_h / 2.0))
             
-            from PyQt6.QtCore import QTimer
             QTimer.singleShot(50, apply_scroll)
             self.update_cursor()
         else:
@@ -381,7 +436,6 @@ class ReaderImageLabel(QLabel):
             self._apply_zoom(1 / 1.1)
 
     def _apply_zoom(self, factor, focus_pos=None):
-        from PyQt6.QtCore import Qt, QPoint, QTimer
         scroll_area = self.get_scroll_area()
         if not scroll_area or not self._raw_pixmap or self._raw_pixmap.isNull():
             return
@@ -463,7 +517,6 @@ class ReaderImageLabel(QLabel):
         QTimer.singleShot(0, apply_scroll)
 
     def wheelEvent(self, event):
-        from PyQt6.QtCore import Qt
         scroll_area = self.get_scroll_area()
         if scroll_area and self.is_zoomed and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
             delta = event.angleDelta().y()
