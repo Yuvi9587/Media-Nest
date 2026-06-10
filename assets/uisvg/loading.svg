@@ -1,6 +1,45 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M5 22h14"></path>
-  <path d="M5 2h14"></path>
-  <path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"></path>
-  <path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"></path>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <defs>
+    <!-- Vibrant cyan/blue gradient for the sand -->
+    <linearGradient id="sand-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#00f2fe" />
+      <stop offset="100%" stop-color="#4facfe" />
+    </linearGradient>
+
+    <!-- Glass volume effect -->
+    <linearGradient id="glass-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.3" />
+      <stop offset="50%" stop-color="#ffffff" stop-opacity="0.05" />
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.15" />
+    </linearGradient>
+
+    <!-- Clip paths to keep sand perfectly inside the glass -->
+    <clipPath id="glass-top">
+      <path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2H7z"/>
+    </clipPath>
+    <clipPath id="glass-bottom">
+      <path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22h10z"/>
+    </clipPath>
+  </defs>
+
+  <!-- Glass Fill -->
+  <path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2H7z" fill="url(#glass-gradient)"/>
+  <path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22h10z" fill="url(#glass-gradient)"/>
+
+  <!-- Top Sand (half empty) -->
+  <rect x="6" y="7" width="12" height="5" fill="url(#sand-gradient)" clip-path="url(#glass-top)"/>
+
+  <!-- Bottom Sand (half full) -->
+  <rect x="6" y="16" width="12" height="6" fill="url(#sand-gradient)" clip-path="url(#glass-bottom)"/>
+
+  <!-- Falling sand stream -->
+  <line x1="12" y1="12" x2="12" y2="17" stroke="url(#sand-gradient)" stroke-width="1.5" stroke-linecap="round"/>
+
+  <!-- Outlines -->
+  <path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22" stroke="#d4d4d4"/>
+  <path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2" stroke="#d4d4d4"/>
+  
+  <!-- Top and Bottom Rims -->
+  <path d="M5 22h14" stroke="#8a8a8a" stroke-width="2"/>
+  <path d="M5 2h14" stroke="#8a8a8a" stroke-width="2"/>
 </svg>

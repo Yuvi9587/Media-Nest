@@ -719,8 +719,8 @@ class VideoDedupTab(QWidget):
             btn_ignore.setStyleSheet("QPushButton { background-color: transparent; border: 1px solid #3fb950; color: #3fb950; padding: 4px 10px; border-radius: 4px; font-weight: bold; } QPushButton:hover { background-color: rgba(63, 185, 80, 0.1); }")
             
             header_layout.addWidget(header)
-            header_layout.addStretch()
             header_layout.addWidget(btn_ignore)
+            header_layout.addStretch()
             card_layout.addLayout(header_layout)
 
             videos_container = QWidget()
