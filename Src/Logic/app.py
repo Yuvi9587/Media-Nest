@@ -860,10 +860,10 @@ class MediaExplorerApp(QMainWindow):
         self.ui.setup_ui(self)
         self.setWindowTitle("Media Nest V3.0.0")
         theme = VSCODE_DARK_THEME
-        
+
         try:
             current_scale = float(os.environ.get("QT_SCALE_FACTOR", "1.0"))
-            
+
             if current_scale < 1.0:
                 theme += """
                     QWidget { 
@@ -876,7 +876,28 @@ class MediaExplorerApp(QMainWindow):
                 """
         except Exception:
             pass
-            
+
+        try:
+            import re as _re
+            if getattr(sys, 'frozen', False):
+                _base = os.path.dirname(sys.executable)
+            else:
+                _base = os.path.abspath(".")
+            _cfg_path = os.path.join(_base, "config.json")
+            if os.path.exists(_cfg_path):
+                with open(_cfg_path, "r") as _f:
+                    _cfg = json.load(_f)
+                    _fs = _cfg.get("font_size", None)
+                    if _fs:
+                        theme = _re.sub(
+                            r'(QWidget\s*\{[^}]*?font-size\s*:\s*)\d+px',
+                            lambda m: m.group(1) + f"{int(_fs)}px",
+                            theme,
+                            flags=_re.DOTALL
+                        )
+        except Exception:
+            pass
+
         self.setStyleSheet(theme)
 
         self.asset_dir = resource_path("assets")
@@ -976,6 +997,16 @@ class MediaExplorerApp(QMainWindow):
                 with open(config_path, "r") as f:
                     config = json.load(f)
                     perf_mode = config.get("performance_mode", "balanced")
+
+                    # Apply saved font size immediately at startup
+                    saved_font_size = config.get("font_size", None)
+                    if saved_font_size:
+                        app_instance = QApplication.instance()
+                        if app_instance:
+                            from PyQt6.QtGui import QFont
+                            _px = int(saved_font_size)
+                            _pt = max(1, round(_px * 72 / 96))
+                            app_instance.setFont(QFont("Segoe UI", _pt))
             except Exception:
                 pass
         self.current_perf_mode = perf_mode
@@ -1116,7 +1147,7 @@ class MediaExplorerApp(QMainWindow):
             
             self.ui.vertical_splitter.insertWidget(0, self.ui.viewer_widget)
             self.ui.vertical_splitter.setSizes([600, 200])
-            self.ui.horizontal_splitter.setSizes([280, 920])
+            self.ui.horizontal_splitter.setSizes([320, 880])
             
             if hasattr(self, 'previous_gallery_mode') and hasattr(self.ui.gallery_section, 'set_size_mode'):
                 self.ui.gallery_section.set_size_mode(self.previous_gallery_mode)
@@ -2864,7 +2895,7 @@ class MediaExplorerApp(QMainWindow):
                     color: white;
                     border-radius: 10px; 
                     font-weight: bold;
-                    font-size: 14px;     
+                    font-size: 1.1em;     
                     padding: 0px 20px;   
                 }
                 QPushButton:hover { background-color: #2ea043; }
@@ -3009,11 +3040,11 @@ class MediaExplorerApp(QMainWindow):
             try:
                 current_scale = float(os.environ.get("QT_SCALE_FACTOR", "1.0"))
                 if current_scale < 1.0:
-                    font_style = "font-size: 14px; font-weight: bold;"
+                    font_style = "font-size: 1.1em; font-weight: bold;"
                 else:
-                    font_style = "font-size: 13px; font-weight: normal;"
+                    font_style = "font-size: 1em; font-weight: normal;"
             except Exception:
-                font_style = "font-size: 13px; font-weight: normal;"
+                font_style = "font-size: 1em; font-weight: normal;"
 
             self.tag_completer.popup().setStyleSheet(f"""
                 QListView {{
@@ -3041,7 +3072,7 @@ class MediaExplorerApp(QMainWindow):
                     color: white;
                     border-radius: 10px; 
                     font-weight: bold;
-                    font-size: 14px;  
+                    font-size: 1.1em;  
                     padding: 0px 20px;  
                 }
             """)

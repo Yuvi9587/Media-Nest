@@ -20,12 +20,12 @@ class FirstTimeSetupDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
         
         header = QLabel("Welcome to Media Nest!")
-        header.setStyleSheet("font-size: 20px; font-weight: bold; color: #00a2ff;")
+        header.setStyleSheet("font-size: 1.5em; font-weight: bold; color: #00a2ff;")
         header.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(header)
         
         lbl_sub = QLabel("How would you like to set up your workspace?")
-        lbl_sub.setStyleSheet("font-size: 14px; color: #cccccc; margin-bottom: 10px;")
+        lbl_sub.setStyleSheet("font-size: 1.1em; color: #cccccc; margin-bottom: 10px;")
         lbl_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(lbl_sub)
         
@@ -66,7 +66,7 @@ class FirstTimeSetupDialog(QDialog):
         
         lbl_info = QLabel(info_text)
         lbl_info.setWordWrap(True)
-        lbl_info.setStyleSheet("font-size: 13px; color: #cccccc; line-height: 1.4;")
+        lbl_info.setStyleSheet("font-size: 1em; color: #cccccc; line-height: 1.4;")
         lbl_info.setTextFormat(Qt.TextFormat.RichText)
         
         info_layout.addWidget(lbl_info)
@@ -80,7 +80,7 @@ class FirstTimeSetupDialog(QDialog):
         self.btn_link_kemono.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_link_kemono.setFixedHeight(45)
         self.btn_link_kemono.setStyleSheet("""
-            QPushButton { background-color: #8957e5; color: white; font-weight: bold; font-size: 14px; border-radius: 6px; border: none; }
+            QPushButton { background-color: #8957e5; color: white; font-weight: bold; font-size: 1.1em; border-radius: 6px; border: none; }
             QPushButton:hover { background-color: #9d6ceb; }
         """)
         self.btn_link_kemono.clicked.connect(self.link_kemono_database)
@@ -89,7 +89,7 @@ class FirstTimeSetupDialog(QDialog):
         self.btn_standalone.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_standalone.setFixedHeight(45)
         self.btn_standalone.setStyleSheet("""
-            QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 14px; border-radius: 6px; border: none; }
+            QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 1.1em; border-radius: 6px; border: none; }
             QPushButton:hover { background-color: #0098ff; }
         """)
         self.btn_standalone.clicked.connect(self.create_portable_workspace)

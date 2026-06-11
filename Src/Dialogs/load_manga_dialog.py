@@ -22,7 +22,7 @@ class LoadMangaDialog(QDialog):
         layout = QVBoxLayout(self)
         
         lbl = QLabel("Select a Manga to Edit:")
-        lbl.setStyleSheet("font-size: 14px; font-weight: bold;")
+        lbl.setStyleSheet("font-size: 1.1em; font-weight: bold;")
         layout.addWidget(lbl)
         
         self.list_widget = QListWidget()

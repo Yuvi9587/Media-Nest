@@ -238,7 +238,7 @@ class DbRepairTab(QWidget):
         title_icon.setPixmap(QIcon(_svg("wrench.svg")).pixmap(16, 16))
 
         title_label = QLabel("Database Repair")
-        title_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #cccccc;")
+        title_label.setStyleSheet("font-weight: bold; font-size: 1em; color: #cccccc;")
 
         title_row.addWidget(title_icon, alignment=Qt.AlignmentFlag.AlignVCenter)
         title_row.addWidget(title_label, alignment=Qt.AlignmentFlag.AlignVCenter)

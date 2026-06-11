@@ -409,7 +409,7 @@ class VideoContainer(QWidget):
         self.timeline_layout = QHBoxLayout()
         
         self.lbl_current_time = QLabel("00:00")
-        self.lbl_current_time.setStyleSheet("color: #cccccc; font-size: 13px; font-weight: bold;")
+        self.lbl_current_time.setStyleSheet("color: #cccccc; font-size: 1em; font-weight: bold;")
         
         self.slider_progress = JumpSlider(Qt.Orientation.Horizontal)
         self.slider_progress.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -420,7 +420,7 @@ class VideoContainer(QWidget):
         """)
                 
         self.lbl_total_time = QLabel("00:00")
-        self.lbl_total_time.setStyleSheet("color: #cccccc; font-size: 13px; font-weight: bold;")
+        self.lbl_total_time.setStyleSheet("color: #cccccc; font-size: 1em; font-weight: bold;")
         
         self.timeline_layout.addWidget(self.lbl_current_time)
         self.timeline_layout.addWidget(self.slider_progress)
@@ -565,7 +565,7 @@ class MainWindowUI:
 
         self.horizontal_splitter.addWidget(self.sidebar_widget)
         self.horizontal_splitter.addWidget(self.right_container)
-        self.horizontal_splitter.setSizes([280, 920])
+        self.horizontal_splitter.setSizes([320, 880])
 
     def setup_sidebar(self):
         self.sidebar_widget = QWidget()
@@ -617,7 +617,7 @@ class MainWindowUI:
                 color: white;
                 border-radius: 10px;
                 font-weight: bold;
-                font-size: 14px;
+                font-size: 1.1em;
                 padding: 0px 20px;
             }
             QPushButton:hover {
@@ -635,7 +635,7 @@ class MainWindowUI:
                 color: white;
                 border-radius: 10px; 
                 font-weight: bold;
-                font-size: 14px;     
+                font-size: 1.1em;     
                 padding: 0px 20px;   
             }
             QPushButton:hover { background-color: #2ea043; }
@@ -652,7 +652,7 @@ class MainWindowUI:
                 background-color: #3e3e42;
                 color: white;
                 border-radius: 10px;
-                font-size: 20px;
+                font-size: 1.5em;
                 text-align: center;  
                 padding: 0px;        
                 padding-bottom: 2px;  
@@ -669,7 +669,7 @@ class MainWindowUI:
                 background-color: #3e3e42;
                 color: white;
                 border-radius: 10px;
-                font-size: 20px;
+                font-size: 1.5em;
             }
             QPushButton:hover { background-color: #505050; }
         """)
@@ -729,7 +729,7 @@ class MainWindowUI:
                 border: 1px solid #3e3e42;
                 border-radius: 6px;
                 padding: 8px 12px;
-                font-size: 13px;
+                font-size: 1em;
             }
             QLineEdit:focus {
                 border: 1px solid #007acc;
@@ -770,7 +770,7 @@ class MainWindowUI:
         self.tag_viewer_header_layout.setContentsMargins(0, 0, 0, 0)
         
         self.tag_viewer_header = QLabel("Tags")
-        self.tag_viewer_header.setStyleSheet("color: #cccccc; font-weight: bold; font-size: 13px;")
+        self.tag_viewer_header.setStyleSheet("color: #cccccc; font-weight: bold; font-size: 1em;")
         
         self.tag_search_input = QLineEdit()
         self.tag_search_input.setPlaceholderText("Search...")
@@ -932,7 +932,7 @@ class MainWindowUI:
 
         self.lbl_placeholder = QLabel("Select media")
         self.lbl_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_placeholder.setStyleSheet("color: #6e6e6e; font-size: 16px;")
+        self.lbl_placeholder.setStyleSheet("color: #6e6e6e; font-size: 1.2em;")
         
         self.image_view_container = QWidget()
         self.image_view_layout = QHBoxLayout(self.image_view_container)
@@ -1066,12 +1066,12 @@ class MainWindowUI:
         header_row.setSpacing(6)
 
         icon_lbl = QLabel("ℹ")
-        icon_lbl.setStyleSheet("color: #569cd6; font-size: 15px; font-weight: bold;")
+        icon_lbl.setStyleSheet("color: #569cd6; font-size: 1.15em; font-weight: bold;")
         icon_lbl.setFixedWidth(18)
 
         title_lbl = QLabel("File Info")
         title_lbl.setStyleSheet(
-            "color: #cccccc; font-size: 12px; font-weight: bold; letter-spacing: 0.5px;"
+            "color: #cccccc; font-size: 0.9em; font-weight: bold; letter-spacing: 0.5px;"
         )
 
         btn_close = QPushButton("✕")
@@ -1084,7 +1084,7 @@ class MainWindowUI:
                 background-color: transparent;
                 color: #888888;
                 border: none;
-                font-size: 12px;
+                font-size: 0.9em;
                 font-weight: bold;
                 border-radius: 11px;
             }
@@ -1112,8 +1112,8 @@ class MainWindowUI:
         outer_layout.addWidget(divider)
 
         # ---- Info rows ----
-        row_style_key   = "color: #7a7a9a; font-size: 11px;"
-        row_style_value = "color: #d4d4d4; font-size: 11px;"
+        row_style_key   = "color: #7a7a9a; font-size: 0.85em;"
+        row_style_value = "color: #d4d4d4; font-size: 0.85em;"
 
         def make_row(key):
             row = QHBoxLayout()

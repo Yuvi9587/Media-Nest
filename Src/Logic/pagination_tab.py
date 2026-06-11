@@ -90,19 +90,19 @@ class PaginationTab(QWidget):
         top_bar = QHBoxLayout()
         self.btn_import = QPushButton("Import Folder")
         self.btn_import.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_import.setStyleSheet("QPushButton { font-size: 13px; background-color: #0e639c; color: white; border-radius: 4px; font-weight: bold; padding: 8px 15px; } QPushButton:hover { background-color: #1177bb; }")
+        self.btn_import.setStyleSheet("QPushButton { font-size: 1em; background-color: #0e639c; color: white; border-radius: 4px; font-weight: bold; padding: 8px 15px; } QPushButton:hover { background-color: #1177bb; }")
         self.btn_import.clicked.connect(self.import_folder)
         top_bar.addWidget(self.btn_import)
         
         self.btn_load_existing = QPushButton("Load Existing")
         self.btn_load_existing.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_load_existing.setStyleSheet("QPushButton { font-size: 13px; background-color: #0e639c; color: white; border-radius: 4px; font-weight: bold; padding: 8px 15px; margin-left: 10px; } QPushButton:hover { background-color: #1177bb; }")
+        self.btn_load_existing.setStyleSheet("QPushButton { font-size: 1em; background-color: #0e639c; color: white; border-radius: 4px; font-weight: bold; padding: 8px 15px; margin-left: 10px; } QPushButton:hover { background-color: #1177bb; }")
         self.btn_load_existing.clicked.connect(self.load_existing_manga)
         top_bar.addWidget(self.btn_load_existing)
         
         self.btn_clear = QPushButton("Clear / New")
         self.btn_clear.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_clear.setStyleSheet("QPushButton { font-size: 13px; background-color: #d13438; color: white; border-radius: 4px; font-weight: bold; padding: 8px 15px; margin-left: 10px; } QPushButton:hover { background-color: #e81123; }")
+        self.btn_clear.setStyleSheet("QPushButton { font-size: 1em; background-color: #d13438; color: white; border-radius: 4px; font-weight: bold; padding: 8px 15px; margin-left: 10px; } QPushButton:hover { background-color: #e81123; }")
         self.btn_clear.clicked.connect(self.clear_manga_state)
         top_bar.addWidget(self.btn_clear)
         
@@ -118,7 +118,7 @@ class PaginationTab(QWidget):
         col1_layout.setContentsMargins(10, 10, 10, 10)
         
         lbl_search = QLabel("1. Search & Select")
-        lbl_search.setStyleSheet("font-weight: bold; font-size: 14px; border: none;")
+        lbl_search.setStyleSheet("font-weight: bold; font-size: 1.1em; border: none;")
         col1_layout.addWidget(lbl_search)
         
         search_row = QHBoxLayout()
@@ -156,7 +156,7 @@ class PaginationTab(QWidget):
         col2_layout.setContentsMargins(10, 10, 10, 10)
         
         lbl_org = QLabel("2. Organize Pages")
-        lbl_org.setStyleSheet("font-weight: bold; font-size: 14px; border: none;")
+        lbl_org.setStyleSheet("font-weight: bold; font-size: 1.1em; border: none;")
         col2_layout.addWidget(lbl_org)
         
         self.org_list = QListWidget()
@@ -196,7 +196,7 @@ class PaginationTab(QWidget):
         col3_layout.setContentsMargins(10, 10, 10, 10)
         
         lbl_prev = QLabel("3. Preview & Details")
-        lbl_prev.setStyleSheet("font-weight: bold; font-size: 14px; border: none;")
+        lbl_prev.setStyleSheet("font-weight: bold; font-size: 1.1em; border: none;")
         col3_layout.addWidget(lbl_prev)
         
         self.lbl_preview = QLabel("Select an image to preview")
@@ -219,7 +219,7 @@ class PaginationTab(QWidget):
         
         self.btn_create = QPushButton("Create Comic/Manga")
         self.btn_create.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_create.setStyleSheet("QPushButton { font-size: 14px; background-color: #8957e5; color: white; border-radius: 4px; font-weight: bold; padding: 12px; margin-top: 15px;} QPushButton:hover { background-color: #9c67fa; }")
+        self.btn_create.setStyleSheet("QPushButton { font-size: 1.1em; background-color: #8957e5; color: white; border-radius: 4px; font-weight: bold; padding: 12px; margin-top: 15px;} QPushButton:hover { background-color: #9c67fa; }")
         self.btn_create.clicked.connect(self.create_manga)
         details_form.addWidget(self.btn_create)
         

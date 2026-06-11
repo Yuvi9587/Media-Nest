@@ -315,7 +315,7 @@ class SupportDialog(QDialog):
                 color: {TEXT_MUTED};
                 border: 1px solid {BORDER};
                 border-radius: 10px;
-                font-size: 11px;
+                font-size: 0.85em;
                 font-weight: bold;
             }}
             QPushButton:hover {{

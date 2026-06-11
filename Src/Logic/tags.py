@@ -111,7 +111,7 @@ class UniversalMediaViewer(QWidget):
         self.lbl_total_time = QLabel("00:00")
 
         for lbl in [self.lbl_current_time, self.lbl_total_time]:
-            lbl.setStyleSheet("color: #cccccc; font-size: 11px; font-weight: bold;")
+            lbl.setStyleSheet("color: #cccccc; font-size: 0.85em; font-weight: bold;")
 
         self.slider_progress = SafeJumpSlider(Qt.Orientation.Horizontal)
         self.slider_progress.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -508,7 +508,7 @@ class ModelDownloadDialog(QDialog):
         layout.setSpacing(15)
 
         lbl = QLabel("The AI models are missing.\nPlease select an engine to download:")
-        lbl.setStyleSheet("font-size: 14px; font-weight: bold;")
+        lbl.setStyleSheet("font-size: 1.1em; font-weight: bold;")
         layout.addWidget(lbl)
 
         self.bg = QButtonGroup(self)
@@ -738,7 +738,7 @@ class TagManagerTab(QWidget):
         self.rename_input.setStyleSheet("padding: 5px; border-radius: 4px; background-color: #252526; color: white; border: 1px solid #3e3e42;")
 
         self.lbl_rename_error = QLabel("⚠️ Name exists!")
-        self.lbl_rename_error.setStyleSheet("color: #ff5252; font-weight: bold; font-size: 11px;")
+        self.lbl_rename_error.setStyleSheet("color: #ff5252; font-weight: bold; font-size: 0.85em;")
         self.lbl_rename_error.setToolTip("A file with this name already exists in this folder.")
         self.lbl_rename_error.hide()
 
@@ -827,7 +827,7 @@ class TagManagerTab(QWidget):
 
         self.console = QPlainTextEdit()
         self.console.setReadOnly(True)
-        self.console.setStyleSheet("background-color: #0c0c0c; color: #4CAF50; font-family: Consolas, monospace; font-size: 11px; border: 1px solid #3e3e42; border-radius: 4px;")
+        self.console.setStyleSheet("background-color: #0c0c0c; color: #4CAF50; font-family: Consolas, monospace; font-size: 0.85em; border: 1px solid #3e3e42; border-radius: 4px;")
         workspace_layout.addWidget(self.console, stretch=3)
 
         self.workspace_btn_layout = QHBoxLayout()
@@ -835,14 +835,14 @@ class TagManagerTab(QWidget):
         self.btn_approve_all_cloud = QPushButton("Batch Approve All")
         self.btn_approve_all_cloud.setMinimumHeight(40)
         self.btn_approve_all_cloud.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_approve_all_cloud.setStyleSheet("QPushButton { background-color: #238636; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #2ea043; }")
+        self.btn_approve_all_cloud.setStyleSheet("QPushButton { background-color: #238636; color: white; font-weight: bold; font-size: 1.1em; border-radius: 4px; } QPushButton:hover { background-color: #2ea043; }")
         self.btn_approve_all_cloud.clicked.connect(self.batch_approve_all_cloud)
         self.btn_approve_all_cloud.hide()
 
         self.btn_save_archive = QPushButton("Save All Pending Changes")
         self.btn_save_archive.setMinimumHeight(40)
         self.btn_save_archive.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
+        self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 1.1em; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
         self.btn_save_archive.clicked.connect(self.graduate_file_to_archive)
 
         self.workspace_btn_layout.addWidget(self.btn_approve_all_cloud)
@@ -864,7 +864,7 @@ class TagManagerTab(QWidget):
         self.cb_help_others.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "handshake.svg"))))
         self.cb_help_others.setIconSize(QSize(20, 20))
         self.cb_help_others.setChecked(True)
-        self.cb_help_others.setStyleSheet("QCheckBox { color: #888; font-style: italic; font-size: 13px; }")
+        self.cb_help_others.setStyleSheet("QCheckBox { color: #888; font-style: italic; font-size: 1em; }")
 
         bottom_layout = QHBoxLayout()
         bottom_layout.addStretch()
@@ -1175,7 +1175,7 @@ class TagManagerTab(QWidget):
 
             self.btn_save_archive.setEnabled(True)
             self.btn_save_archive.setText("Save All Pending Changes")
-            self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
+            self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 1.1em; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
             self.btn_approve_all_cloud.hide()
 
         else:
@@ -1213,19 +1213,19 @@ class TagManagerTab(QWidget):
             if not is_in_tagless:
                 self.btn_save_archive.setEnabled(False)
                 self.btn_save_archive.setText("Already Archived")
-                self.btn_save_archive.setStyleSheet("QPushButton { background-color: #2d2d2d; color: #666666; font-weight: bold; font-size: 14px; border-radius: 4px; border: 1px solid #3e3e42; }")
+                self.btn_save_archive.setStyleSheet("QPushButton { background-color: #2d2d2d; color: #666666; font-weight: bold; font-size: 1.1em; border-radius: 4px; border: 1px solid #3e3e42; }")
                 self.btn_approve_all_cloud.hide()
 
             elif file_hash in self.pending_cloud_matches:
                 self.btn_save_archive.setEnabled(True)
                 self.btn_save_archive.setText("Approve Selected")
-                self.btn_save_archive.setStyleSheet("QPushButton { background-color: #8957e5; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #9a68f6; }")
+                self.btn_save_archive.setStyleSheet("QPushButton { background-color: #8957e5; color: white; font-weight: bold; font-size: 1.1em; border-radius: 4px; } QPushButton:hover { background-color: #9a68f6; }")
                 self.btn_approve_all_cloud.show()
 
             else:
                 self.btn_save_archive.setEnabled(True)
                 self.btn_save_archive.setText("Save All Pending Changes")
-                self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
+                self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 1.1em; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
                 self.btn_approve_all_cloud.hide()
 
 
@@ -1444,7 +1444,7 @@ class TagManagerTab(QWidget):
             self.btn_approve_all_cloud.hide()
 
             self.btn_save_archive.setText("Archive and Save File")
-            self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
+            self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 1.1em; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
 
             if self.current_file_hash:
                 self.lbl_tag_preview.clear_image("Select a file from the Inbox to work on")
@@ -1465,7 +1465,7 @@ class TagManagerTab(QWidget):
         if not self.btn_save_archive.isEnabled():
             self.btn_save_archive.setEnabled(True)
             self.btn_save_archive.setText("Save Updates to Archive")
-            self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
+            self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 1.1em; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
 
     def graduate_file_to_archive(self):
         if self.current_file_hash:
@@ -1596,7 +1596,7 @@ class TagManagerTab(QWidget):
             self.current_file_hash = None
 
             self.btn_save_archive.setText("Save All Pending Changes")
-            self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 14px; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
+            self.btn_save_archive.setStyleSheet("QPushButton { background-color: #007acc; color: white; font-weight: bold; font-size: 1.1em; border-radius: 4px; } QPushButton:hover { background-color: #0098ff; }")
             self.btn_approve_all_cloud.hide()
 
             self.refresh_global_tags()

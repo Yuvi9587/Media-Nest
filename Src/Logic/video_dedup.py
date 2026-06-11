@@ -262,7 +262,7 @@ class VideoDedupTab(QWidget):
         preview_layout = QVBoxLayout(self.preview_frame)
         
         self.lbl_preview_title = QLabel("Video Player (Click a video to play)")
-        self.lbl_preview_title.setStyleSheet("font-weight: bold; font-size: 14px; color: #ffffff; border: none;")
+        self.lbl_preview_title.setStyleSheet("font-weight: bold; font-size: 1.1em; color: #ffffff; border: none;")
         preview_layout.addWidget(self.lbl_preview_title)
         
         self.video_widget = QVideoWidget()
@@ -303,7 +303,7 @@ class VideoDedupTab(QWidget):
         """)
         
         self.lbl_time = QLabel("00:00 / 00:00")
-        self.lbl_time.setStyleSheet("color: #cccccc; font-size: 12px; font-weight: bold; font-family: Consolas;")
+        self.lbl_time.setStyleSheet("color: #cccccc; font-size: 0.9em; font-weight: bold; font-family: Consolas;")
 
         controls_layout.addWidget(self.btn_skip_back)
         controls_layout.addWidget(self.btn_play_pause)
@@ -712,7 +712,7 @@ class VideoDedupTab(QWidget):
             
             header_layout = QHBoxLayout()
             header = QLabel(f"Exact Duplicate Group #{i+1} ({len(items)} videos)")
-            header.setStyleSheet("font-weight: bold; color: #ffffff; border: none; font-size: 14px; padding-bottom: 5px;")
+            header.setStyleSheet("font-weight: bold; color: #ffffff; border: none; font-size: 1.1em; padding-bottom: 5px;")
             
             btn_ignore = QPushButton("Mark as 'Not Duplicates'")
             btn_ignore.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -774,7 +774,7 @@ class VideoDedupTab(QWidget):
 
                 info_text = (
                     f"<b style='color: white;'>{v_name[:25]}...</b><br>"
-                    f"<span style='color: #a0a0a0; font-size: 10px;'>"
+                    f"<span style='color: #a0a0a0; font-size: 0.77em;'>"
                     f"{vid.get('FrameSize','N/A')} | {vid.get('Size','N/A')}<br>"
                     f"⏱️ {vid.get('Duration','N/A')}"
                     f"</span>"

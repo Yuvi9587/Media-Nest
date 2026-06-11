@@ -131,6 +131,7 @@ class SettingsDialog(QDialog):
         self.config_path = os.path.join(base_dir, "config.json")
         self.current_db_folder = ""
         self.current_ui_scale = "1.0"
+        self.current_font_size = 13
 
         self.db_folder_changed = False
         self.ui_scale_changed = False
@@ -213,6 +214,7 @@ class SettingsDialog(QDialog):
                         pass
                     self.current_strictness = config.get("dedupe_strictness", 0)
                     self.current_perf_mode = config.get("performance_mode", "balanced")
+                    self.current_font_size = config.get("font_size", 13)
             except Exception:
                 pass
 
@@ -293,6 +295,38 @@ class SettingsDialog(QDialog):
         scale_row.addWidget(self.combo_scale)
         scale_row.addStretch()
         ui_inner_layout.addLayout(scale_row)
+
+        # ── Font Size (real-time, no restart needed) ──────────────────────
+        font_row = QHBoxLayout()
+        lbl_font = QLabel("Font Size (Live):")
+        lbl_font.setToolTip("Changes text size across the whole app instantly — no restart needed.")
+        font_row.addWidget(lbl_font)
+
+        self.combo_font_size = QComboBox()
+        self._font_size_options = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+        for sz in self._font_size_options:
+            label = f"{sz}px (Default)" if sz == 13 else f"{sz}px"
+            self.combo_font_size.addItem(label, sz)
+
+        # Select current value
+        for i in range(self.combo_font_size.count()):
+            if self.combo_font_size.itemData(i) == self.current_font_size:
+                self.combo_font_size.setCurrentIndex(i)
+                break
+
+        self.combo_font_size.currentIndexChanged.connect(self.on_font_size_changed)
+        self.combo_font_size.setToolTip("Instantly adjusts text size — useful when UI Scale is set below 100%.")
+
+        font_row.addWidget(self.combo_font_size)
+
+        lbl_font_preview = QLabel("Preview: The quick brown fox")
+        lbl_font_preview.setObjectName("FontPreviewLabel")
+        lbl_font_preview.setStyleSheet("color: #7ec8e3; font-style: italic; margin-left: 12px;")
+        font_row.addWidget(lbl_font_preview)
+        self._font_preview_label = lbl_font_preview
+
+        font_row.addStretch()
+        ui_inner_layout.addLayout(font_row)
 
         perf_row = QHBoxLayout()
         perf_row.addWidget(QLabel("Performance Mode:"))
@@ -514,6 +548,58 @@ class SettingsDialog(QDialog):
                 self.combo_scale.setCurrentText(self._last_scale_text)
         else:
             self._last_scale_text = text
+
+    def on_font_size_changed(self, index):
+        """Updates the preview label only. Font is applied app-wide on Save Settings."""
+        size = self.combo_font_size.itemData(index)
+        if size is None:
+            return
+        self.current_font_size = size
+
+        # Update preview label only
+        if hasattr(self, '_font_preview_label'):
+            self._font_preview_label.setStyleSheet(
+                f"color: #7ec8e3; font-style: italic; margin-left: 12px; font-size: {size}px;"
+            )
+
+    def _apply_font_size_to_app(self, size: int):
+        """Patches the main window stylesheet and the app-level font so every widget uses the new size."""
+        from PyQt6.QtGui import QFont
+
+        app = QApplication.instance()
+        if not app:
+            return
+
+        # 1. Apply to QApplication font using POINT size (avoids Qt internal setPointSize(-1) warnings).
+        #    Conversion: pt = px * 72 / 96  (at standard 96 DPI screen)
+        pt = max(1, round(size * 72 / 96))
+        app.setFont(QFont("Segoe UI", pt))
+
+        # 2. Patch the MAIN WINDOW stylesheet so the `QWidget { font-size: Xpx; }` rule is updated.
+        #    This is the authoritative rule that all child widgets (labels, buttons, tree, gallery…) inherit.
+        if not self.main_app:
+            return
+
+        current_ss = self.main_app.styleSheet()
+
+        # Track what size we last applied so repeated changes still work.
+        prev_size = getattr(self, '_last_applied_font_px', 13)
+
+        # Simple string replacement — reliable across Python versions and edge cases.
+        # The theme has exactly: `font-size: 13px;`
+        # After a previous call it has: `font-size: {prev_size}px;`
+        old_token = f"font-size: {prev_size}px"
+        new_token = f"font-size: {size}px"
+
+        if old_token in current_ss:
+            # Replace only the FIRST occurrence (the QWidget base rule).
+            patched_ss = current_ss.replace(old_token, new_token, 1)
+        else:
+            # Fallback: prepend a QWidget font-size override rule.
+            patched_ss = f"QWidget {{ font-size: {size}px; }}\n" + current_ss
+
+        self.main_app.setStyleSheet(patched_ss)
+        self._last_applied_font_px = size
 
     def keyPressEvent(self, event):
         """Intercepts Arrow Keys to navigate the duplicate grid instantly without lag."""
@@ -1833,6 +1919,13 @@ class SettingsDialog(QDialog):
                     "Restart Required",
                     "You have changed the UI Scale.\n\nPlease restart Media Nest for the new scaling to take effect!"
                 )
+
+            # Font size — applies to entire app via stylesheet + QApplication font
+            new_font_size = self.combo_font_size.itemData(self.combo_font_size.currentIndex())
+            if new_font_size:
+                config["font_size"] = new_font_size
+                config_changed = True
+                self._apply_font_size_to_app(new_font_size)
 
             new_perf_val = self.perf_map[self.combo_perf.currentText()]
             if new_perf_val != self.current_perf_mode:

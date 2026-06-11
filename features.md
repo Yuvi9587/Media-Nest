@@ -300,6 +300,8 @@ When a database is connected, the search bar becomes a powerful tag-based search
 
 Right-clicking any file in the **gallery** or **file tree** opens a context menu with standard file operations like copy, cut, paste, rename, delete, and more.
 
+- **File Info**: Click this option to reveal a detailed information panel about the selected file, including resolution, duration, file size, and exact path.
+
 > **Note:** You cannot paste files into database search results — you must be viewing a real folder first.
 
 ---
