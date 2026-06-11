@@ -29,12 +29,14 @@ class FileContextMenu(QObject):
         action_paste = QAction("Paste", widget)
         action_delete = QAction("Delete", widget)
         action_open = QAction("Open in Explorer", widget)
+        action_file_info = QAction("ℹ File Info", widget)
 
         if not selected_path:
             action_copy.setEnabled(False)
             action_cut.setEnabled(False)
             action_delete.setEnabled(False)
             action_open.setEnabled(False)
+            action_file_info.setEnabled(False)
 
         clipboard = QApplication.clipboard()
         if not clipboard.mimeData().hasUrls() or current_folder == "VIRTUAL_BLOCK":
@@ -45,6 +47,7 @@ class FileContextMenu(QObject):
         action_paste.triggered.connect(lambda: self.on_paste(current_folder))
         action_delete.triggered.connect(lambda: self.on_delete(selected_path))
         action_open.triggered.connect(lambda: self.on_open_in_explorer(selected_path))
+        action_file_info.triggered.connect(lambda: self.on_show_file_info(selected_path))
 
         menu.addAction(action_copy)
         menu.addAction(action_cut)
@@ -53,6 +56,8 @@ class FileContextMenu(QObject):
         menu.addAction(action_delete)
         menu.addSeparator()
         menu.addAction(action_open)
+        menu.addSeparator()
+        menu.addAction(action_file_info)
 
         menu.exec(global_position)
 
@@ -164,3 +169,9 @@ class FileContextMenu(QObject):
             subprocess.Popen(["open", "-R", path])
         else:
             subprocess.Popen(["xdg-open", os.path.dirname(path)])
+
+    def on_show_file_info(self, path):
+        """Delegates to the app to show the file info panel."""
+        if not path: return
+        if hasattr(self.app, 'show_file_info_panel'):
+            self.app.show_file_info_panel(path)

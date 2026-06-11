@@ -933,6 +933,9 @@ class MediaExplorerApp(QMainWindow):
         self.floating_viewer = None
         self.ui.tree_view.expanded.connect(self.on_item_expanded)
         self.ui.tree_view.clicked.connect(self.on_tree_item_clicked)
+
+        # Wire the File Info panel close button to return to the Tags view
+        self.ui.file_info_panel.btn_close.clicked.connect(self._on_file_info_closed)
         
         self.ui.gallery_section.list_widget.currentItemChanged.connect(self.on_gallery_item_changed)
         self.ui.btn_add_tag_main.clicked.connect(self.add_main_tag)
@@ -1265,6 +1268,161 @@ class MediaExplorerApp(QMainWindow):
         dialog = SupportDialog(self)
         dialog.exec()
 
+
+    def show_file_info_panel(self, path):
+        """Populates the File Info panel and swaps it in place of the Tags section."""
+        import datetime
+
+        panel = self.ui.file_info_panel
+
+        # Strip custom_manga: prefix if present
+        display_path = path
+        if display_path.startswith("custom_manga:"):
+            parts = display_path.split("|")
+            if len(parts) >= 2:
+                display_path = parts[1]
+
+        # Default values
+        name = size_str = mod_str = resolution_str = duration_str = "—"
+        ftype = "—"
+
+        try:
+            name = os.path.basename(display_path) or display_path
+            ext_lower = os.path.splitext(display_path)[1].lower()
+
+            # ── File type & size ──────────────────────────────────────────
+            if os.path.isdir(display_path):
+                ftype = "Folder"
+                try:
+                    count = sum(1 for _ in os.scandir(display_path))
+                    size_str = f"{count} item(s)"
+                except OSError:
+                    size_str = "—"
+            else:
+                ext_upper = ext_lower.upper()
+                ftype = f"{ext_upper.lstrip('.')} File" if ext_upper else "File"
+                try:
+                    sz = os.path.getsize(display_path)
+                    if sz < 1024:
+                        size_str = f"{sz} B"
+                    elif sz < 1024 ** 2:
+                        size_str = f"{sz / 1024:.1f} KB"
+                    elif sz < 1024 ** 3:
+                        size_str = f"{sz / 1024 ** 2:.2f} MB"
+                    else:
+                        size_str = f"{sz / 1024 ** 3:.2f} GB"
+                except OSError:
+                    size_str = "—"
+
+            # ── Modified date ──────────────────────────────────────────────
+            try:
+                mtime = os.path.getmtime(display_path)
+                mod_str = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d  %H:%M")
+            except OSError:
+                mod_str = "—"
+
+            # ── Resolution & Duration ──────────────────────────────────────
+            IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".tif"}
+            VIDEO_EXTS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".wmv", ".m4v"}
+
+            if ext_lower in IMAGE_EXTS and not os.path.isdir(display_path):
+                try:
+                    from PIL import Image as _PILImage
+                    with _PILImage.open(display_path) as img:
+                        w, h = img.size
+                        resolution_str = f"{w} × {h} px"
+                        # For animated GIFs show frame count too
+                        if ext_lower == ".gif":
+                            try:
+                                frames = getattr(img, "n_frames", 1)
+                                if frames > 1:
+                                    duration_str = f"{frames} frames"
+                            except Exception:
+                                pass
+                except Exception:
+                    resolution_str = "—"
+
+            elif ext_lower in VIDEO_EXTS and not os.path.isdir(display_path):
+                # Try cv2 first (fast, no subprocess needed)
+                try:
+                    import cv2 as _cv2
+                    cap = _cv2.VideoCapture(display_path)
+                    if cap.isOpened():
+                        w   = int(cap.get(_cv2.CAP_PROP_FRAME_WIDTH))
+                        h   = int(cap.get(_cv2.CAP_PROP_FRAME_HEIGHT))
+                        fps = cap.get(_cv2.CAP_PROP_FPS)
+                        fc  = cap.get(_cv2.CAP_PROP_FRAME_COUNT)
+                        cap.release()
+                        if w > 0 and h > 0:
+                            resolution_str = f"{w} × {h} px"
+                        if fps > 0 and fc > 0:
+                            total_sec = int(fc / fps)
+                            h_part, rem = divmod(total_sec, 3600)
+                            m_part, s_part = divmod(rem, 60)
+                            if h_part:
+                                duration_str = f"{h_part}:{m_part:02}:{s_part:02}"
+                            else:
+                                duration_str = f"{m_part}:{s_part:02}"
+                except ImportError:
+                    # cv2 not installed — try ffprobe via subprocess
+                    try:
+                        import subprocess, json as _json
+                        result = subprocess.run(
+                            ["ffprobe", "-v", "quiet", "-print_format", "json",
+                             "-show_streams", "-show_format", display_path],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        if result.returncode == 0:
+                            data = _json.loads(result.stdout)
+                            for stream in data.get("streams", []):
+                                if stream.get("codec_type") == "video":
+                                    w = stream.get("width", 0)
+                                    h = stream.get("height", 0)
+                                    if w and h:
+                                        resolution_str = f"{w} × {h} px"
+                                    break
+                            dur = float(data.get("format", {}).get("duration", 0))
+                            if dur > 0:
+                                total_sec = int(dur)
+                                h_part, rem = divmod(total_sec, 3600)
+                                m_part, s_part = divmod(rem, 60)
+                                if h_part:
+                                    duration_str = f"{h_part}:{m_part:02}:{s_part:02}"
+                                else:
+                                    duration_str = f"{m_part}:{s_part:02}"
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+
+        except Exception:
+            display_path = path
+
+        panel.lbl_info_name.setText(name)
+        panel.lbl_info_type.setText(ftype)
+        panel.lbl_info_size.setText(size_str)
+        panel.lbl_info_resolution.setText(resolution_str)
+        panel.lbl_info_duration.setText(duration_str)
+        panel.lbl_info_modified.setText(mod_str)
+        panel.lbl_info_path.setText(display_path)
+        panel.lbl_info_path.setToolTip(display_path)
+
+        # Switch the stacked widget to the File Info page
+        self.ui.show_file_info_in_stack()
+
+
+    def _on_file_info_closed(self):
+        """Called when the × button on the File Info panel is clicked.
+        If tags were visible, switch back to Tags; otherwise hide the stack."""
+        has_tags = self.ui.tag_list_widget.count() > 0
+        if has_tags:
+            self.ui.show_tags_in_stack()
+        else:
+            self.ui.bottom_stack.hide()
+            sizes = self.ui.sidebar_vertical_splitter.sizes()
+            total = sum(sizes)
+            self.ui.sidebar_vertical_splitter.setSizes([total, 0])
+
     def show_gallery_context_menu(self, position):
         list_widget = self.ui.gallery_section.list_widget
         item = list_widget.itemAt(position)
@@ -1560,8 +1718,11 @@ class MediaExplorerApp(QMainWindow):
         if hasattr(self.ui, 'manga_reader'):
             self.ui.manga_reader.hide()
             
-        if hasattr(self.ui, 'tag_viewer_container'):
-            self.ui.tag_viewer_container.hide()
+        if hasattr(self.ui, 'bottom_stack'):
+            self.ui.bottom_stack.hide()
+            sizes = self.ui.sidebar_vertical_splitter.sizes()
+            total = sum(sizes)
+            self.ui.sidebar_vertical_splitter.setSizes([total, 0])
             
         self.ui.lbl_placeholder.setText("Select a file to view")
         self.ui.lbl_placeholder.show()
@@ -2230,17 +2391,35 @@ class MediaExplorerApp(QMainWindow):
                 self.tag_fetch_worker.tags_fetched.connect(self.on_tags_fetched)
                 self.tag_fetch_worker.start()
             else:
-                self.ui.tag_viewer_container.hide()
+                # No DB — hide the bottom stack if we're on the Tags page
+                if self.ui.bottom_stack.currentIndex() == 0:
+                    self.ui.bottom_stack.hide()
+                    sizes = self.ui.sidebar_vertical_splitter.sizes()
+                    total = sum(sizes)
+                    self.ui.sidebar_vertical_splitter.setSizes([total, 0])
 
     def on_tags_fetched(self, tags):
         self.ui.tag_list_widget.clear()
         if tags:
-            self.ui.tag_viewer_container.show()
+            # Only switch to tags if file-info is NOT currently showing
+            if self.ui.bottom_stack.currentIndex() != 1:
+                self.ui.show_tags_in_stack()
+            else:
+                # Tags updated silently; populate but don't steal the view
+                pass
+            self.ui.tag_viewer_container.show()   # keep internal visibility flag correct
             for tag in tags:
                 item = QListWidgetItem(tag)
                 self.ui.tag_list_widget.addItem(item)
+            # Make the bottom stack/tags visible
+            self.ui.show_tags_in_stack()
         else:
-            self.ui.tag_viewer_container.hide()
+            # No tags — if file-info isn't showing, collapse the bottom section
+            if self.ui.bottom_stack.currentIndex() == 0:
+                self.ui.bottom_stack.hide()
+                sizes = self.ui.sidebar_vertical_splitter.sizes()
+                total = sum(sizes)
+                self.ui.sidebar_vertical_splitter.setSizes([total, 0])
 
     def add_main_tag(self):
         new_tag = self.ui.input_new_tag.text().strip().lower().replace(" ", "_")
@@ -2282,7 +2461,7 @@ class MediaExplorerApp(QMainWindow):
 
             item = QListWidgetItem(new_tag)
             self.ui.tag_list_widget.addItem(item)
-            self.ui.tag_viewer_container.show()
+            self.ui.show_tags_in_stack()
         except Exception as e:
             print(f"Error adding tag: {e}")
 

@@ -1,7 +1,8 @@
 import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTreeView, 
                              QSplitter, QLabel, QPushButton, QScrollArea, QFrame, 
-                             QSlider, QStyle, QLineEdit, QScrollBar, QSizePolicy, QProgressBar, QListWidget, QListWidgetItem)
+                             QSlider, QStyle, QLineEdit, QScrollBar, QSizePolicy, QProgressBar,
+                             QListWidget, QListWidgetItem, QStackedWidget)
 from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal, QPoint, QEvent
 from PyQt6.QtGui import QMouseEvent, QPixmap, QIcon, QShortcut, QKeySequence, QCursor
 from PyQt6.QtMultimediaWidgets import QVideoWidget
@@ -864,8 +865,16 @@ class MainWindowUI:
         self.tag_viewer_layout.addWidget(self.tag_edit_container)
         
         self.tag_viewer_container.hide()
-        
-        self.sidebar_vertical_splitter.addWidget(self.tag_viewer_container)
+
+        # Stacked widget: page 0 = Tags, page 1 = File Info
+        self.bottom_stack = QStackedWidget()
+        self.bottom_stack.addWidget(self.tag_viewer_container)   # index 0
+        self.file_info_panel = self._build_file_info_panel()     # index 1
+        self.bottom_stack.addWidget(self.file_info_panel)
+        self.bottom_stack.setCurrentIndex(0)
+        self.bottom_stack.hide()   # stays hidden until tags/file-info are needed
+
+        self.sidebar_vertical_splitter.addWidget(self.bottom_stack)
         self.sidebar_layout.addWidget(self.sidebar_vertical_splitter)
         self.sidebar_vertical_splitter.setSizes([600, 200])
 
@@ -874,6 +883,24 @@ class MainWindowUI:
         for i in range(self.tag_list_widget.count()):
             item = self.tag_list_widget.item(i)
             item.setHidden(search_term not in item.text().lower())
+
+    def show_tags_in_stack(self):
+        """Switch the bottom stack back to the Tags page and make it visible."""
+        self.bottom_stack.setCurrentIndex(0)
+        if self.bottom_stack.isHidden():
+            self.bottom_stack.show()
+            sizes = self.sidebar_vertical_splitter.sizes()
+            total = sum(sizes)
+            self.sidebar_vertical_splitter.setSizes([max(total - 200, 100), 200])
+
+    def show_file_info_in_stack(self):
+        """Switch the bottom stack to the File Info page and make it visible."""
+        self.bottom_stack.setCurrentIndex(1)
+        if self.bottom_stack.isHidden():
+            self.bottom_stack.show()
+            sizes = self.sidebar_vertical_splitter.sizes()
+            total = sum(sizes)
+            self.sidebar_vertical_splitter.setSizes([max(total - 220, 100), 220])
 
     def toggle_tag_list(self):
         is_hidden = self.tag_list_widget.isHidden()
@@ -1023,3 +1050,98 @@ class MainWindowUI:
 
     def svg_path(self, name):
         return os.path.join(self.asset_dir, "Svg", f"{name}.svg")
+
+    def _build_file_info_panel(self):
+        """Creates the file info panel that replaces the Tags section in the splitter."""
+        panel = QWidget()
+        panel.setObjectName("FileInfoPanel")
+
+        outer_layout = QVBoxLayout(panel)
+        outer_layout.setContentsMargins(10, 8, 10, 10)
+        outer_layout.setSpacing(6)
+
+        # ---- Header row: icon + title + close (×) button ----
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(6)
+
+        icon_lbl = QLabel("ℹ")
+        icon_lbl.setStyleSheet("color: #569cd6; font-size: 15px; font-weight: bold;")
+        icon_lbl.setFixedWidth(18)
+
+        title_lbl = QLabel("File Info")
+        title_lbl.setStyleSheet(
+            "color: #cccccc; font-size: 12px; font-weight: bold; letter-spacing: 0.5px;"
+        )
+
+        btn_close = QPushButton("✕")
+        btn_close.setObjectName("FileInfoCloseBtn")
+        btn_close.setFixedSize(22, 22)
+        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_close.setToolTip("Close File Info – return to Tags")
+        btn_close.setStyleSheet("""
+            QPushButton#FileInfoCloseBtn {
+                background-color: transparent;
+                color: #888888;
+                border: none;
+                font-size: 12px;
+                font-weight: bold;
+                border-radius: 11px;
+            }
+            QPushButton#FileInfoCloseBtn:hover {
+                background-color: #c0392b;
+                color: white;
+            }
+        """)
+        # The actual connection is wired in show_file_info_in_stack / show_tags_in_stack
+        # We store the button so app.py can wire it after construction.
+        panel.btn_close = btn_close
+
+        header_row.addWidget(icon_lbl)
+        header_row.addWidget(title_lbl)
+        header_row.addStretch()
+        header_row.addWidget(btn_close)
+        outer_layout.addLayout(header_row)
+
+        # ---- Divider ----
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setStyleSheet(
+            "background-color: #3e3e42; max-height: 1px; border: none; margin: 2px 0px;"
+        )
+        outer_layout.addWidget(divider)
+
+        # ---- Info rows ----
+        row_style_key   = "color: #7a7a9a; font-size: 11px;"
+        row_style_value = "color: #d4d4d4; font-size: 11px;"
+
+        def make_row(key):
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 2, 0, 2)
+            row.setSpacing(8)
+            k = QLabel(key)
+            k.setStyleSheet(row_style_key)
+            k.setFixedWidth(64)
+            k.setAlignment(Qt.AlignmentFlag.AlignTop)
+            v = QLabel("—")
+            v.setStyleSheet(row_style_value)
+            v.setWordWrap(True)
+            v.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            row.addWidget(k)
+            row.addWidget(v, 1)
+            return row, v
+
+        row_name,       panel.lbl_info_name       = make_row("Name:")
+        row_type,       panel.lbl_info_type       = make_row("Type:")
+        row_size,       panel.lbl_info_size       = make_row("Size:")
+        row_resolution, panel.lbl_info_resolution = make_row("Resolution:")
+        row_duration,   panel.lbl_info_duration   = make_row("Duration:")
+        row_modified,   panel.lbl_info_modified   = make_row("Modified:")
+        row_path,       panel.lbl_info_path       = make_row("Path:")
+
+        for row in (row_name, row_type, row_size, row_resolution, row_duration,
+                    row_modified, row_path):
+            outer_layout.addLayout(row)
+
+        outer_layout.addStretch()
+        return panel
