@@ -24,6 +24,11 @@ class CustomVideoWidget(QVideoWidget):
     skip_backward_signal = pyqtSignal()
     toggle_play_signal = pyqtSignal()
 
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Left:
             self.skip_backward_signal.emit()
@@ -36,6 +41,8 @@ class CustomVideoWidget(QVideoWidget):
 
         else:
             super().keyPressEvent(event)
+
+
 
 class DynamicImageLabel(QLabel):
     """A smart label that natively recalculates image/GIF scale during ANY UI resize (like dragging splitters)."""
@@ -827,6 +834,7 @@ class MainWindowUI:
             }
         """)
         self.tag_list_widget.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self.tag_list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tag_list_widget.setWrapping(True)
         self.tag_list_widget.setFlow(QListWidget.Flow.LeftToRight)
         self.tag_list_widget.setResizeMode(QListWidget.ResizeMode.Adjust)
@@ -887,6 +895,7 @@ class MainWindowUI:
     def show_tags_in_stack(self):
         """Switch the bottom stack back to the Tags page and make it visible."""
         self.bottom_stack.setCurrentIndex(0)
+        self.bottom_stack.setMaximumHeight(16777215)
         if self.bottom_stack.isHidden():
             self.bottom_stack.show()
             sizes = self.sidebar_vertical_splitter.sizes()
@@ -896,6 +905,7 @@ class MainWindowUI:
     def show_file_info_in_stack(self):
         """Switch the bottom stack to the File Info page and make it visible."""
         self.bottom_stack.setCurrentIndex(1)
+        self.bottom_stack.setMaximumHeight(16777215)
         if self.bottom_stack.isHidden():
             self.bottom_stack.show()
             sizes = self.sidebar_vertical_splitter.sizes()
@@ -905,7 +915,10 @@ class MainWindowUI:
     def toggle_tag_list(self):
         is_hidden = self.tag_list_widget.isHidden()
         if is_hidden:
+            self.bottom_stack.setMaximumHeight(16777215)
             self.tag_list_widget.show()
+            if hasattr(self, 'tag_edit_container'): self.tag_edit_container.show()
+            if hasattr(self, 'tag_search_input'): self.tag_search_input.show()
             self.btn_toggle_tags.setIcon(QIcon(resource_path("assets/uisvg/hide_tags.svg")))
             if hasattr(self, 'sidebar_vertical_splitter'):
                 sizes = self.sidebar_vertical_splitter.sizes()
@@ -913,11 +926,14 @@ class MainWindowUI:
                 self.sidebar_vertical_splitter.setSizes([max(total - 200, 0), 200])
         else:
             self.tag_list_widget.hide()
+            if hasattr(self, 'tag_edit_container'): self.tag_edit_container.hide()
+            if hasattr(self, 'tag_search_input'): self.tag_search_input.hide()
             self.btn_toggle_tags.setIcon(QIcon(resource_path("assets/uisvg/unhide_tags.svg")))
             if hasattr(self, 'sidebar_vertical_splitter'):
+                self.bottom_stack.setMaximumHeight(43)
                 sizes = self.sidebar_vertical_splitter.sizes()
                 total = sum(sizes)
-                self.sidebar_vertical_splitter.setSizes([total, 0])
+                self.sidebar_vertical_splitter.setSizes([total, 43])
 
     def setup_right_side(self, main_window):
         self.right_container = QWidget()

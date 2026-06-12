@@ -1,5 +1,10 @@
 import sys
 import os
+
+if sys.platform == "win32":
+    # Force the Windows Media Foundation backend for hardware-accelerated 4K playback on low-end CPUs
+    os.environ["QT_MEDIA_BACKEND"] = "windows"
+
 import io
 import time
 import json
@@ -877,6 +882,7 @@ class MediaExplorerApp(QMainWindow):
         except Exception:
             pass
 
+        # Patch theme font-size from saved config at startup
         try:
             import re as _re
             if getattr(sys, 'frozen', False):
@@ -962,6 +968,7 @@ class MediaExplorerApp(QMainWindow):
         self.ui.btn_add_tag_main.clicked.connect(self.add_main_tag)
         self.ui.input_new_tag.returnPressed.connect(self.add_main_tag)
         self.ui.btn_delete_tag_main.clicked.connect(self.delete_main_tag)
+        self.ui.tag_list_widget.customContextMenuRequested.connect(self.show_tag_context_menu)
         if hasattr(self.ui.gallery_section, 'filter_combo'):
             self.ui.gallery_section.filter_combo.currentTextChanged.connect(self.on_filter_changed)
         if hasattr(self.ui.gallery_section, 'name_filter_input'):
@@ -1010,6 +1017,8 @@ class MediaExplorerApp(QMainWindow):
             except Exception:
                 pass
         self.current_perf_mode = perf_mode
+        self.last_mouse_button = Qt.MouseButton.LeftButton
+
         self.thumbnail_map = {} 
         self.thumb_worker = ThumbnailWorker(perf_mode=perf_mode)
         self.thumb_worker.thumbnail_ready.connect(self.on_thumbnail_ready)
@@ -1567,6 +1576,7 @@ class MediaExplorerApp(QMainWindow):
                 self.load_media(path)
 
     def toggle_play_pause(self):
+
         if (
             self.media_player.playbackState()
             == QMediaPlayer.PlaybackState.PlayingState
@@ -1855,12 +1865,16 @@ class MediaExplorerApp(QMainWindow):
 
     def eventFilter(self, obj, event):
         try:
+            if event.type() == QEvent.Type.MouseButtonPress:
+                self.last_mouse_button = event.button()
+
             if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Escape:
                 if getattr(self, 'is_video_maximized', False):
                     self.toggle_fullscreen()
                     return True
 
             if event.type() == QEvent.Type.KeyPress:
+                self.last_mouse_button = Qt.MouseButton.NoButton
                 if obj.__class__.__name__ != "QLineEdit":
                     if event.matches(QKeySequence.StandardKey.Copy):
                         self.shortcut_copy()
@@ -2068,6 +2082,8 @@ class MediaExplorerApp(QMainWindow):
         self.ui.tree_view.viewport().update()
 
     def on_tree_item_clicked(self, index):
+        if getattr(self, 'last_mouse_button', Qt.MouseButton.NoButton) == Qt.MouseButton.RightButton:
+            return
         item = self.get_source_item(index)
         if not item: return
         path = str(item.data(Qt.ItemDataRole.UserRole))
@@ -2363,9 +2379,28 @@ class MediaExplorerApp(QMainWindow):
         scaled_pixmap = self.current_manhwa_pixmap.scaledToWidth(new_width, Qt.TransformationMode.SmoothTransformation)
         self.ui.lbl_image.setPixmap(scaled_pixmap)
 
+    def check_video_resolution(self, path):
+        try:
+            import cv2 as _cv2
+            cap = _cv2.VideoCapture(path)
+            if not cap.isOpened():
+                return 0, 0
+            w = int(cap.get(_cv2.CAP_PROP_FRAME_WIDTH))
+            h = int(cap.get(_cv2.CAP_PROP_FRAME_HEIGHT))
+            cap.release()
+            return w, h
+        except Exception:
+            return 0, 0
+
+
+
     def play_video(self, path):
         if not path:
             return
+
+        perf_mode = getattr(self, "current_perf_mode", "balanced")
+        
+        self.ui.video_widget.show()
 
         if getattr(self, "current_perf_mode", "balanced") != "high":
             if hasattr(self, "thumb_worker"):
@@ -2409,6 +2444,8 @@ class MediaExplorerApp(QMainWindow):
         super().keyPressEvent(event)
 
     def on_gallery_item_changed(self, current_item, previous_item):
+        if getattr(self, 'last_mouse_button', Qt.MouseButton.NoButton) == Qt.MouseButton.RightButton:
+            return
         if current_item:
             path = current_item.data(Qt.ItemDataRole.UserRole)
             self.load_media(path)
@@ -2532,12 +2569,51 @@ class MediaExplorerApp(QMainWindow):
                             if img_row:
                                 cursor.execute("DELETE FROM ImageTags WHERE hash = ? AND tag_id = ?", (img_row[0], tag_id))
 
-                self.ui.tag_list_widget.takeItem(self.ui.tag_list_widget.row(item))
-
             conn.commit()
             conn.close()
+
+            for item in selected_items:
+                row = self.ui.tag_list_widget.row(item)
+                self.ui.tag_list_widget.takeItem(row)
+
         except Exception as e:
             print(f"Error deleting tag: {e}")
+
+    def show_tag_context_menu(self, pos):
+        item = self.ui.tag_list_widget.itemAt(pos)
+        if not item: return
+
+        from PyQt6.QtWidgets import QMenu
+        menu = QMenu(self.ui.tag_list_widget)
+        
+        edit_action = menu.addAction("Edit")
+        delete_action = menu.addAction("Delete")
+        
+        menu.setStyleSheet("""
+            QMenu { background-color: #252526; color: #d4d4d4; border: 1px solid #3e3e42; }
+            QMenu::item { padding: 4px 20px; }
+            QMenu::item:selected { background-color: #007acc; }
+        """)
+
+        action = menu.exec(self.ui.tag_list_widget.mapToGlobal(pos))
+        if action == delete_action:
+            self.ui.tag_list_widget.clearSelection()
+            item.setSelected(True)
+            self.delete_main_tag()
+        elif action == edit_action:
+            self.edit_main_tag(item)
+
+    def edit_main_tag(self, item):
+        from PyQt6.QtWidgets import QInputDialog
+        old_tag = item.text()
+        new_tag, ok = QInputDialog.getText(self, "Edit Tag", "Enter new tag name:", text=old_tag)
+        if ok and new_tag.strip() and new_tag.strip() != old_tag:
+            self.ui.tag_list_widget.clearSelection()
+            item.setSelected(True)
+            self.delete_main_tag()
+            self.ui.input_new_tag.setText(new_tag.strip())
+            self.add_main_tag()
+
 
     def on_search_bar_typed(self, text):
         self.search_timer.start()
