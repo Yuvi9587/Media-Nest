@@ -170,10 +170,10 @@ class FirstTimeSetupDialog(QDialog):
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
             
-            cursor.execute("CREATE TABLE IF NOT EXISTS Images (hash TEXT PRIMARY KEY, file_path TEXT, file_name TEXT, phash TEXT)")
+            cursor.execute("CREATE TABLE IF NOT EXISTS Images (hash TEXT PRIMARY KEY, file_path TEXT, file_name TEXT, phash TEXT, file_size INTEGER)")
             cursor.execute("CREATE TABLE IF NOT EXISTS Tags (tag_id INTEGER PRIMARY KEY AUTOINCREMENT, tag_name TEXT UNIQUE)")
             cursor.execute("CREATE TABLE IF NOT EXISTS ImageTags (hash TEXT, tag_id INTEGER, PRIMARY KEY (hash, tag_id))")
-            cursor.execute("CREATE TABLE IF NOT EXISTS tagless (hash TEXT PRIMARY KEY, file_path TEXT, file_name TEXT, phash TEXT)")
+            cursor.execute("CREATE TABLE IF NOT EXISTS tagless (hash TEXT PRIMARY KEY, file_path TEXT, file_name TEXT, phash TEXT, file_size INTEGER)")
             cursor.execute("CREATE TABLE IF NOT EXISTS IgnoredPairs (hash1 TEXT, hash2 TEXT, PRIMARY KEY (hash1, hash2))")
             
             cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangas (manga_id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, cover_image TEXT)")

@@ -11,6 +11,7 @@ import json
 import sqlite3
 import hashlib
 from PIL import Image
+Image.MAX_IMAGE_PIXELS = None
 from PyQt6.QtWidgets import (QMainWindow, QFileDialog, QApplication, QMenu, 
                              QStyledItemDelegate, QStyle, QListWidgetItem,
                              QCompleter, QMessageBox, QVBoxLayout, QWidget, QListWidget,
@@ -18,7 +19,8 @@ from PyQt6.QtWidgets import (QMainWindow, QFileDialog, QApplication, QMenu,
 from PyQt6.QtGui import (QPixmap, QIcon, QAction, QStandardItemModel, 
                          QStandardItem, QColor, QPainter, QImageReader, QImage, QMovie,
                          QKeySequence, QShortcut, QIcon)
-from PyQt6.QtCore import (QDir, QUrl, Qt, QRect, QEvent, pyqtSignal, QTimer, 
+from PyQt6.QtCore import ( QStringListModel,
+QDir, QUrl, Qt, QRect, QEvent, pyqtSignal, QTimer, 
                           QThread, QObject, QSize, QSortFilterProxyModel, QBuffer, QByteArray,
                           QSettings, QPoint)
 
@@ -404,6 +406,90 @@ class ThumbnailWorker(QObject):
         self.clear_queue()
         self.add_to_queue(new_queue)
 
+
+class FileSizeBackfillWorker(QThread):
+    def __init__(self, db_path):
+        super().__init__()
+        self.db_path = db_path
+
+    def run(self):
+        try:
+            import os
+            import sqlite3
+            conn = sqlite3.connect(self.db_path)
+            conn.execute("PRAGMA journal_mode=WAL;")
+            cursor = conn.cursor()
+
+            # Process Images table
+            cursor.execute("SELECT hash, file_path FROM Images WHERE file_size IS NULL")
+            rows = cursor.fetchall()
+            updates = []
+            for h, p in rows:
+                if os.path.exists(p):
+                    updates.append((os.path.getsize(p), h))
+            
+            if updates:
+                cursor.executemany("UPDATE Images SET file_size = ? WHERE hash = ?", updates)
+                conn.commit()
+
+            # Process tagless table
+            cursor.execute("SELECT hash, file_path FROM tagless WHERE file_size IS NULL")
+            rows = cursor.fetchall()
+            updates = []
+            for h, p in rows:
+                if os.path.exists(p):
+                    updates.append((os.path.getsize(p), h))
+
+            if updates:
+                cursor.executemany("UPDATE tagless SET file_size = ? WHERE hash = ?", updates)
+                conn.commit()
+
+            conn.close()
+        except Exception as e:
+            print(f"File size backfill failed: {e}")
+
+
+class FileSizeBackfillWorker(QThread):
+    def __init__(self, db_path):
+        super().__init__()
+        self.db_path = db_path
+
+    def run(self):
+        try:
+            import os
+            import sqlite3
+            conn = sqlite3.connect(self.db_path)
+            conn.execute("PRAGMA journal_mode=WAL;")
+            cursor = conn.cursor()
+
+            # Process Images table
+            cursor.execute("SELECT hash, file_path FROM Images WHERE file_size IS NULL")
+            rows = cursor.fetchall()
+            updates = []
+            for h, p in rows:
+                if os.path.exists(p):
+                    updates.append((os.path.getsize(p), h))
+            
+            if updates:
+                cursor.executemany("UPDATE Images SET file_size = ? WHERE hash = ?", updates)
+                conn.commit()
+
+            # Process tagless table
+            cursor.execute("SELECT hash, file_path FROM tagless WHERE file_size IS NULL")
+            rows = cursor.fetchall()
+            updates = []
+            for h, p in rows:
+                if os.path.exists(p):
+                    updates.append((os.path.getsize(p), h))
+
+            if updates:
+                cursor.executemany("UPDATE tagless SET file_size = ? WHERE hash = ?", updates)
+                conn.commit()
+
+            conn.close()
+        except Exception as e:
+            print(f"File size backfill failed: {e}")
+
 class DatabaseSearchWorker(QThread):
     search_finished = pyqtSignal(list, dict, str, bool, int) 
     error_occurred = pyqtSignal(str)
@@ -420,16 +506,40 @@ class DatabaseSearchWorker(QThread):
 
     def run(self):
         try:
+            import re
             conn = sqlite3.connect(self.db_path)
             conn.execute("PRAGMA journal_mode=WAL;")
             cursor = conn.cursor()
 
             raw_tags = [t.strip() for t in self.search_text.split(',') if t.strip()]
             req_tags, opt_tags = [], []
+            sys_filters = []
 
             for t in raw_tags:
                 is_or = t.startswith('~')
                 clean_tag = t[1:].strip() if is_or else t
+                
+                if clean_tag.lower().startswith("system:size"):
+                    match = re.search(r'([><=]+)\s*(.*)', clean_tag.split(':', 1)[1])
+                    if match:
+                        op = match.group(1)
+                        if op == '==': op = '='
+                        if op in ('>', '<', '=', '>=', '<=', '!=', '<>'):
+                            size_str = match.group(2).lower().strip()
+                            smatch = re.match(r'([\d.]+)\s*([a-z]*)', size_str)
+                            if smatch:
+                                val = float(smatch.group(1))
+                                unit = smatch.group(2)
+                                multiplier = 1
+                                if unit in ('kb', 'k'): multiplier = 1024
+                                elif unit in ('mb', 'm'): multiplier = 1024**2
+                                elif unit in ('gb', 'g'): multiplier = 1024**3
+                                sys_filters.append(f"Images.file_size {op} {int(val * multiplier)}")
+                    continue
+                
+                if ":" in clean_tag:
+                    clean_tag = clean_tag.split(":", 1)[1].strip()
+                    
                 clean_tag = clean_tag.replace(' ', '_')
                 if clean_tag:
                     if is_or: opt_tags.append(clean_tag)
@@ -437,40 +547,56 @@ class DatabaseSearchWorker(QThread):
 
             all_tags = req_tags + opt_tags
 
-            if not all_tags:
+            if not all_tags and not sys_filters:
                 self.search_finished.emit([], {}, self.search_text, False, self.search_id)
                 return
 
-            placeholders = ', '.join(['?'] * len(all_tags))
             file_filter_sql = ""
             if self.filter_type == "Images":
                 file_filter_sql = " AND (Images.file_name LIKE '%.jpg' OR Images.file_name LIKE '%.jpeg' OR Images.file_name LIKE '%.png' OR Images.file_name LIKE '%.gif' OR Images.file_name LIKE '%.bmp' OR Images.file_name LIKE '%.webp')"
             elif self.filter_type == "Videos":
                 file_filter_sql = " AND (Images.file_name LIKE '%.mp4' OR Images.file_name LIKE '%.mkv' OR Images.file_name LIKE '%.avi' OR Images.file_name LIKE '%.mov' OR Images.file_name LIKE '%.webm')"
-            query = f"""
-                SELECT Images.file_path, Images.file_name 
-                FROM Images
-                JOIN ImageTags ON Images.hash = ImageTags.hash
-                JOIN Tags ON ImageTags.tag_id = Tags.tag_id
-                WHERE Tags.tag_name IN ({placeholders}){file_filter_sql}
-                GROUP BY Images.hash
-                HAVING 1=1
-            """
-            params = all_tags.copy()
+            
+            sys_filter_sql = ""
+            if sys_filters:
+                sys_filter_sql = " AND " + " AND ".join(sys_filters)
 
-            if req_tags:
-                req_placeholders = ', '.join(['?'] * len(req_tags))
-                query += f" AND SUM(CASE WHEN Tags.tag_name IN ({req_placeholders}) THEN 1 ELSE 0 END) = ?"
-                params.extend(req_tags)
-                params.append(len(req_tags))
+            if not all_tags:
+                query = f"""
+                    SELECT Images.file_path, Images.file_name 
+                    FROM Images
+                    WHERE 1=1 {file_filter_sql} {sys_filter_sql}
+                    ORDER BY Images.phash
+                    LIMIT ? OFFSET ?
+                """
+                params = [self.limit, self.offset]
+            else:
+                placeholders = ', '.join(['?'] * len(all_tags))
+                query = f"""
+                    SELECT Images.file_path, Images.file_name 
+                    FROM Images
+                    JOIN ImageTags ON Images.hash = ImageTags.hash
+                    JOIN Tags ON ImageTags.tag_id = Tags.tag_id
+                    WHERE Tags.tag_name IN ({placeholders}){file_filter_sql} {sys_filter_sql}
+                    GROUP BY Images.hash
+                    HAVING 1=1
+                """
+                params = all_tags.copy()
 
-            if opt_tags:
-                opt_placeholders = ', '.join(['?'] * len(opt_tags))
-                query += f" AND SUM(CASE WHEN Tags.tag_name IN ({opt_placeholders}) THEN 1 ELSE 0 END) > 0"
-                params.extend(opt_tags)
-            query += " ORDER BY Images.phash"
-            query += " LIMIT ? OFFSET ?"
-            params.extend([self.limit, self.offset])
+            if all_tags:
+                if req_tags:
+                    req_placeholders = ', '.join(['?'] * len(req_tags))
+                    query += f" AND SUM(CASE WHEN Tags.tag_name IN ({req_placeholders}) THEN 1 ELSE 0 END) = ?"
+                    params.extend(req_tags)
+                    params.append(len(req_tags))
+
+                if opt_tags:
+                    opt_placeholders = ', '.join(['?'] * len(opt_tags))
+                    query += f" AND SUM(CASE WHEN Tags.tag_name IN ({opt_placeholders}) THEN 1 ELSE 0 END) > 0"
+                    params.extend(opt_tags)
+                query += " ORDER BY Images.phash"
+                query += " LIMIT ? OFFSET ?"
+                params.extend([self.limit, self.offset])
 
             cursor.execute(query, params)
             results = cursor.fetchall()
@@ -486,89 +612,91 @@ class DatabaseSearchWorker(QThread):
                     valid_results.append((file_path, file_name, "image"))
 
             if self.filter_type in ["All", "Images"]:
-                manga_query = f"""
-                    WITH GalleryAllTags AS (
-                        SELECT MangaTags.gallery_id, LOWER(REPLACE(Tags.tag_name, ' ', '_')) as tag
-                        FROM MangaTags
-                        JOIN Tags ON MangaTags.tag_id = Tags.tag_id
-                        UNION
-                        SELECT gallery_id, LOWER(REPLACE(artist, ' ', '_')) as tag
+                if all_tags:
+                    manga_query = f"""
+                        WITH GalleryAllTags AS (
+                            SELECT MangaTags.gallery_id, LOWER(REPLACE(Tags.tag_name, ' ', '_')) as tag
+                            FROM MangaTags
+                            JOIN Tags ON MangaTags.tag_id = Tags.tag_id
+                            UNION
+                            SELECT gallery_id, LOWER(REPLACE(artist, ' ', '_')) as tag
+                            FROM MangaGalleries
+                            WHERE artist IS NOT NULL AND artist != ''
+                        )
+                        SELECT MangaGalleries.folder_path, MangaGalleries.title 
                         FROM MangaGalleries
-                        WHERE artist IS NOT NULL AND artist != ''
-                    )
-                    SELECT MangaGalleries.folder_path, MangaGalleries.title 
-                    FROM MangaGalleries
-                    JOIN GalleryAllTags ON MangaGalleries.gallery_id = GalleryAllTags.gallery_id
-                    WHERE GalleryAllTags.tag IN ({placeholders})
-                    GROUP BY MangaGalleries.gallery_id
-                    HAVING 1=1
-                """
-                manga_params = all_tags.copy()
-                if req_tags:
-                    manga_query += f" AND SUM(CASE WHEN GalleryAllTags.tag IN ({req_placeholders}) THEN 1 ELSE 0 END) = ?"
-                    manga_params.extend(req_tags)
-                    manga_params.append(len(req_tags))
-                if opt_tags:
-                    manga_query += f" AND SUM(CASE WHEN GalleryAllTags.tag IN ({opt_placeholders}) THEN 1 ELSE 0 END) > 0"
-                    manga_params.extend(opt_tags)
-                manga_query += " LIMIT ? OFFSET ?"
-                manga_params.extend([self.limit, self.offset])
+                        JOIN GalleryAllTags ON MangaGalleries.gallery_id = GalleryAllTags.gallery_id
+                        WHERE GalleryAllTags.tag IN ({placeholders})
+                        GROUP BY MangaGalleries.gallery_id
+                        HAVING 1=1
+                    """
+                    manga_params = all_tags.copy()
+                    if req_tags:
+                        manga_query += f" AND SUM(CASE WHEN GalleryAllTags.tag IN ({req_placeholders}) THEN 1 ELSE 0 END) = ?"
+                        manga_params.extend(req_tags)
+                        manga_params.append(len(req_tags))
+                    if opt_tags:
+                        manga_query += f" AND SUM(CASE WHEN GalleryAllTags.tag IN ({opt_placeholders}) THEN 1 ELSE 0 END) > 0"
+                        manga_params.extend(opt_tags)
+                    manga_query += " LIMIT ? OFFSET ?"
+                    manga_params.extend([self.limit, self.offset])
 
-                try:
-                    cursor.execute(manga_query, manga_params)
-                    manga_results = cursor.fetchall()
-                    for folder_path, title in manga_results:
-                        if not self.is_running: return
-                        if os.path.exists(folder_path):
-                            valid_results.append((folder_path, title, "gallery"))
-                except sqlite3.OperationalError:
-                    pass
+                    try:
+                        cursor.execute(manga_query, manga_params)
+                        manga_results = cursor.fetchall()
+                        for folder_path, title in manga_results:
+                            if not self.is_running: return
+                            if os.path.exists(folder_path):
+                                valid_results.append((folder_path, title, "gallery"))
+                    except sqlite3.OperationalError:
+                        pass
 
             if self.filter_type in ["All", "Images"]:
-                custom_query = f"""
-                    WITH CustomAllTags AS (
-                        SELECT manga_id, LOWER(REPLACE(tag_name, ' ', '_')) as tag
-                        FROM CustomMangaTags
-                        UNION
-                        SELECT manga_id, LOWER(REPLACE(title, ' ', '_')) as tag
+                if all_tags:
+                    custom_query = f"""
+                        WITH CustomAllTags AS (
+                            SELECT manga_id, LOWER(REPLACE(tag_name, ' ', '_')) as tag
+                            FROM CustomMangaTags
+                            UNION
+                            SELECT manga_id, LOWER(REPLACE(title, ' ', '_')) as tag
+                            FROM CustomMangas
+                        )
+                        SELECT CustomMangas.manga_id, CustomMangas.title, CustomMangas.cover_image
                         FROM CustomMangas
-                    )
-                    SELECT CustomMangas.manga_id, CustomMangas.title, CustomMangas.cover_image
-                    FROM CustomMangas
-                    JOIN CustomAllTags ON CustomMangas.manga_id = CustomAllTags.manga_id
-                    WHERE CustomAllTags.tag IN ({placeholders})
-                    GROUP BY CustomMangas.manga_id
-                    HAVING 1=1
-                """
-                custom_params = all_tags.copy()
-                if req_tags:
-                    custom_query += f" AND SUM(CASE WHEN CustomAllTags.tag IN ({req_placeholders}) THEN 1 ELSE 0 END) = ?"
-                    custom_params.extend(req_tags)
-                    custom_params.append(len(req_tags))
-                if opt_tags:
-                    custom_query += f" AND SUM(CASE WHEN CustomAllTags.tag IN ({opt_placeholders}) THEN 1 ELSE 0 END) > 0"
-                    custom_params.extend(opt_tags)
-                custom_query += " LIMIT ? OFFSET ?"
-                custom_params.extend([self.limit, self.offset])
+                        JOIN CustomAllTags ON CustomMangas.manga_id = CustomAllTags.manga_id
+                        WHERE CustomAllTags.tag IN ({placeholders})
+                        GROUP BY CustomMangas.manga_id
+                        HAVING 1=1
+                    """
+                    custom_params = all_tags.copy()
+                    if req_tags:
+                        custom_query += f" AND SUM(CASE WHEN CustomAllTags.tag IN ({req_placeholders}) THEN 1 ELSE 0 END) = ?"
+                        custom_params.extend(req_tags)
+                        custom_params.append(len(req_tags))
+                    if opt_tags:
+                        custom_query += f" AND SUM(CASE WHEN CustomAllTags.tag IN ({opt_placeholders}) THEN 1 ELSE 0 END) > 0"
+                        custom_params.extend(opt_tags)
+                    custom_query += " LIMIT ? OFFSET ?"
+                    custom_params.extend([self.limit, self.offset])
 
-                try:
-                    cursor.execute(custom_query, custom_params)
-                    custom_results = cursor.fetchall()
-                    for manga_id, title, cover_image in custom_results:
-                        if not self.is_running: return
-                        
-                        cursor2 = conn.cursor()
-                        cursor2.execute("SELECT image_path FROM CustomMangaPages WHERE manga_id = ? AND image_path != ? ORDER BY page_number ASC LIMIT 3", (manga_id, cover_image))
-                        extra_pages = [r[0] for r in cursor2.fetchall()]
-                        
-                        custom_path = f"custom_manga:{manga_id}|{cover_image}"
-                        for ex in extra_pages:
-                            custom_path += f"|{ex}"
+                    try:
+                        cursor.execute(custom_query, custom_params)
+                        custom_results = cursor.fetchall()
+                        for manga_id, title, cover_image in custom_results:
+                            if not self.is_running: return
                             
-                        if os.path.exists(cover_image):
-                            valid_results.append((custom_path, title, "gallery"))
-                except sqlite3.OperationalError:
-                    pass
+                            cursor2 = conn.cursor()
+                            cursor2.execute("SELECT image_path FROM CustomMangaPages WHERE manga_id = ? AND image_path != ? ORDER BY page_number ASC LIMIT 3", (manga_id, cover_image))
+                            extra_pages = [r[0] for r in cursor2.fetchall()]
+                            
+                            custom_path = f"custom_manga:{manga_id}|{cover_image}"
+                            for ex in extra_pages:
+                                custom_path += f"|{ex}"
+                                
+                            if os.path.exists(cover_image):
+                                valid_results.append((custom_path, title, "gallery"))
+                    except sqlite3.OperationalError:
+                        pass
 
             is_appending = self.offset > 0
             self.search_finished.emit(valid_results, dict(folders_map), self.search_text, is_appending, self.search_id)
@@ -682,53 +810,181 @@ class SmartTreeFilter(QSortFilterProxyModel):
 
         return False
 
+class NsTabExpander(QObject):
+    """
+    Shows inline ghost text for namespace aliases directly in the input field.
+    """
+    FULL_NS = ['character:', 'series:', 'artist:', 'metadata:', 'general:', 'system:size ']
+    
+    NS_MIN_LEN = {
+        'character:': 4,
+        'series:':    3,
+        'artist:':    3,
+        'metadata:':  4,
+        'general:':   3,
+        'system:size ': 4,
+    }
+
+    def __init__(self, widget, parent=None):
+        super().__init__(parent)
+        self.widget = widget
+        widget.textEdited.connect(self._on_text_edited)
+
+    def _get_last_term_info(self, full_text, cursor_pos):
+        text_before = full_text[:cursor_pos]
+        if ',' in text_before:
+            comma_pos = text_before.rfind(',')
+            prefix = full_text[:comma_pos + 1] + ' '
+            last_term = text_before[comma_pos + 1:].lstrip()
+        else:
+            prefix = ''
+            last_term = text_before.lstrip()
+        return prefix, last_term
+
+    def _find_ns_completion(self, term):
+        if not term or ':' in term:
+            return None
+        term_lower = term.lower()
+        matches = [ns for ns in self.FULL_NS if ns.startswith(term_lower) and ns != term_lower]
+        if len(matches) == 1:
+            ns = matches[0]
+            if len(term_lower) >= self.NS_MIN_LEN.get(ns, 3):
+                return ns
+        return None
+
+    def _on_text_edited(self, text):
+        cursor_pos = self.widget.cursorPosition()
+        prefix, last_term = self._get_last_term_info(text, cursor_pos)
+
+        match = self._find_ns_completion(last_term)
+        if match:
+            new_text = prefix + match
+            typed_end = len(prefix) + len(last_term)
+            self.widget.blockSignals(True)
+            self.widget.setText(new_text)
+            self.widget.setSelection(typed_end, len(new_text) - typed_end)
+            self.widget.blockSignals(False)
+            # Emit textEdited so the completer knows the text has expanded to the full namespace.
+            # This makes DbLookupCompleter see "character:" instead of "char", causing its 
+            # search term to be empty (""), which closes the popup and prevents it from stealing the Tab key.
+            self.widget.textEdited.emit(new_text)
+
+    def eventFilter(self, obj, event):
+        if obj is not self.widget:
+            return False
+            
+        if event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+            if key == Qt.Key.Key_Backspace:
+                if self.widget.hasSelectedText():
+                    sel_start = self.widget.selectionStart()
+                    sel_length = self.widget.selectionLength()
+                    text = self.widget.text()
+                    if sel_start > 0 and (sel_start + sel_length == len(text)):
+                        new_text = text[:sel_start - 1]
+                        self.widget.setText(new_text)
+                        self.widget.setCursorPosition(len(new_text))
+                        return True
+        return False
+
+class NsColorModel(QStringListModel):
+    def data(self, index, role):
+        if role == Qt.ItemDataRole.ForegroundRole:
+            text = super().data(index, Qt.ItemDataRole.DisplayRole)
+            if text and ":" in text:
+                ns = text.split(":", 1)[0].lower()
+                colors = {
+                    'character': QColor(0, 255, 0),
+                    'series': QColor(255, 0, 255),
+                    'artist': QColor(255, 255, 0),
+                    'metadata': QColor(255, 165, 0)
+                }
+                return colors.get(ns, QColor(200, 200, 200))
+            return QColor(200, 200, 200)
+        return super().data(index, role)
+
 class MultiTagCompleter(QCompleter):
+    NS_ALIASES = {
+        'char': 'character:', 'character': 'character:',
+        'ser': 'series:', 'series': 'series:',
+        'art': 'artist:', 'artist': 'artist:',
+        'meta': 'metadata:', 'metadata': 'metadata:',
+        'gen': 'general:', 'general': 'general:',
+    }
+
     def __init__(self, tags, parent=None):
-        super().__init__(tags, parent)
+        self._all_tags = list(tags)
+        super().__init__(self._all_tags, parent)
         self.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self.setFilterMode(Qt.MatchFlag.MatchContains) 
+        self.setFilterMode(Qt.MatchFlag.MatchContains)
+
+    def _get_last_term(self, text):
+        if ',' in text:
+            return text.split(',')[-1].lstrip()
+        return text.lstrip()
+
+    def _filtered_tags(self, namespace):
+        prefix = f"{namespace}:"
+        return [t[len(prefix):] for t in self._all_tags if t.startswith(prefix)]
 
     def showPopup(self):
         super().showPopup()
-        
         popup = self.popup()
         search_bar = self.widget()
-        
         if popup and search_bar:
-            
             global_pos = search_bar.mapToGlobal(QPoint(0, search_bar.height()))
-            
             popup.move(global_pos)
-            
             popup.setFixedWidth(search_bar.width())
 
     def pathFromIndex(self, index):
         suggestion = super().pathFromIndex(index)
         current_text = self.widget().text()
-        
+        last_term = self._get_last_term(current_text)
+
+        if suggestion in self.NS_ALIASES:
+            expanded = self.NS_ALIASES[suggestion]
+            if ',' in current_text:
+                prefix = current_text[:current_text.rfind(',')]
+                return f"{prefix}, {expanded}"
+            return expanded
+
+        _KNOWN_NS = ('character:', 'series:', 'artist:', 'metadata:', 'general:')
+
+        if ':' in last_term:
+            ns_part, _ = last_term.split(':', 1)
+            if any(suggestion.startswith(ns) for ns in _KNOWN_NS):
+                full_suggestion = suggestion
+            else:
+                full_suggestion = f"{ns_part}:{suggestion}"
+        else:
+            full_suggestion = suggestion
+
         if ',' in current_text:
             prefix = current_text[:current_text.rfind(',')]
-            last_word = current_text.split(',')[-1].strip()
-            
-            if last_word.startswith('~'):
-                return f"{prefix}, ~{suggestion}"
-            return f"{prefix}, {suggestion}"
-        
+            if last_term.startswith('~'):
+                return f"{prefix}, ~{full_suggestion}"
+            return f"{prefix}, {full_suggestion}"
+
         if current_text.strip().startswith('~'):
-            return f"~{suggestion}"
-            
-        return suggestion
+            return f"~{full_suggestion}"
+
+        return full_suggestion
 
     def splitPath(self, path):
-        if ',' in path:
-            search_term = path.split(',')[-1].lstrip()
-        else:
-            search_term = path.lstrip()
-            
-        if search_term.startswith('~'):
-            search_term = search_term[1:]
-            
-        return [search_term]
+        last_term = self._get_last_term(path)
+
+        if last_term.startswith('~'):
+            last_term = last_term[1:]
+
+        if ':' in last_term:
+            ns_part, tag_part = last_term.split(':', 1)
+            ns_part = ns_part.strip().lower()
+            filtered = self._filtered_tags(ns_part)
+            self.model().setStringList(filtered)
+            return [tag_part]
+
+        self.model().setStringList(self._all_tags)
+        return [last_term]
 
 class ScannerWorker(QThread):
     batch_found = pyqtSignal(str, list)
@@ -944,7 +1200,7 @@ class MediaExplorerApp(QMainWindow):
         self.clear_player_timer.setSingleShot(True) 
         self.clear_player_timer.timeout.connect(self.clear_media_viewer)
 
-        self.ui.search_bar.textChanged.connect(self.on_search_bar_typed)
+        self.ui.search_bar.textEdited.connect(self.on_search_bar_typed)
         self.ui.search_bar.returnPressed.connect(self.force_instant_search)
 
         self.delegate = FolderButtonDelegate(self.ui.tree_view)
@@ -1115,6 +1371,12 @@ class MediaExplorerApp(QMainWindow):
             )
 
     def media_status_changed(self, status):
+        # Auto-play as soon as the media is actually ready (avoids 0xC00D6D60)
+        if status in (QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia):
+            if getattr(self, '_autoplay_pending', False):
+                self._autoplay_pending = False
+                self.media_player.play()
+
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
             if self.is_video_looping:
                 self.media_player.setPosition(0) 
@@ -2418,11 +2680,12 @@ class MediaExplorerApp(QMainWindow):
 
         self.media_player.stop()
 
+        # Signal media_status_changed to auto-play once media is ready
+        self._autoplay_pending = True
+
         self.media_player.setSource(QUrl.fromLocalFile(path))
 
         self.media_player.setPlaybackRate(1.0)
-
-        self.media_player.play()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Left:
@@ -3007,49 +3270,60 @@ class MediaExplorerApp(QMainWindow):
         else:
             QMessageBox.critical(self, "Error", f"Could not find library.db in:\n{db_folder}")
 
-    def reload_autocomplete_tags(self):
-        """Reloads all tags from the database and updates the completers (called when new custom mangas are created)."""
+    def _get_categorized_tags(self):
         if not hasattr(self, 'db_connection'):
-            return
+            return []
             
         cursor = self.db_connection.cursor()
-        cursor.execute("SELECT tag_name FROM Tags")
-        all_tags = set([row[0] for row in cursor.fetchall()])
+        tag_dict = {}
+        
+        def add_tag(name, ns):
+            prio = {'character': 5, 'artist': 4, 'series': 3, 'metadata': 2, 'general': 1}
+            current_ns = tag_dict.get(name, 'general')
+            if name not in tag_dict or prio.get(ns, 1) > prio.get(current_ns, 1):
+                tag_dict[name] = ns
         
         try:
-            cursor.execute("SELECT DISTINCT artist FROM MangaGalleries WHERE artist IS NOT NULL AND artist != ''")
-            artists = [row[0] for row in cursor.fetchall()]
-            all_tags.update(artists)
+            cursor.execute("SELECT tag_name, tag_type FROM Tags")
+            for row in cursor.fetchall():
+                if row[0]:
+                    add_tag(row[0], row[1] if row[1] else 'general')
         except sqlite3.OperationalError:
-            pass
-            
+            cursor.execute("SELECT tag_name FROM Tags")
+            for row in cursor.fetchall():
+                if row[0]: add_tag(row[0], 'general')
+                
         try:
-            char_db_path = os.path.join(self.current_db_folder, "characters.db")
-            if os.path.exists(char_db_path):
-                char_conn = sqlite3.connect(char_db_path)
-                char_conn.execute("PRAGMA journal_mode=WAL;")
-                char_cursor = char_conn.cursor()
-                char_cursor.execute("SELECT DISTINCT character_name FROM Characters")
-                chars = [row[0] for row in char_cursor.fetchall()]
-                all_tags.update(chars)
-                char_conn.close()
-        except Exception:
+            cursor.execute("SELECT DISTINCT artist FROM MangaGalleries WHERE artist IS NOT NULL AND artist != ''")
+            for row in cursor.fetchall():
+                if row[0]: add_tag(row[0], 'artist')
+        except sqlite3.OperationalError:
             pass
             
         try:
             cursor.execute("SELECT DISTINCT tag_name FROM CustomMangaTags")
-            custom_tags = [row[0] for row in cursor.fetchall()]
-            all_tags.update(custom_tags)
+            for row in cursor.fetchall():
+                if row[0]: add_tag(row[0], 'general')
             
             cursor.execute("SELECT DISTINCT title FROM CustomMangas WHERE title IS NOT NULL AND title != ''")
-            custom_titles = [row[0] for row in cursor.fetchall()]
-            all_tags.update(custom_titles)
+            for row in cursor.fetchall():
+                if row[0]: add_tag(row[0], 'series')
         except sqlite3.OperationalError:
             pass
             
-        all_tags = sorted(list(all_tags))
+        def sort_key(item):
+            name, ns = item
+            ns_prio = {'character': 1, 'series': 2, 'artist': 3, 'metadata': 4, 'general': 5}
+            return (ns_prio.get(ns, 99), name)
+            
+        return [f"{ns}:{name}" for name, ns in sorted(tag_dict.items(), key=sort_key)]
+
+    def reload_autocomplete_tags(self):
+        """Reloads all tags from the database and updates the completers (called when new custom mangas are created)."""
+        all_tags = self._get_categorized_tags()
         
         if hasattr(self, 'tag_completer'):
+            self.tag_completer._all_tags = all_tags
             self.tag_completer.model().setStringList(all_tags)
             
         try:
@@ -3060,6 +3334,83 @@ class MediaExplorerApp(QMainWindow):
                     self.settings_dialog.tab_pagination.custom_tags_completer.model().setStringList(all_tags)
         except Exception:
             pass
+
+    def _install_ns_tab_filter(self, widget):
+        expander = NsTabExpander(widget, parent=self)
+        widget.installEventFilter(expander)
+        if not hasattr(self, '_ns_tab_filters'):
+            self._ns_tab_filters = []
+        self._ns_tab_filters.append(expander)
+
+    def upgrade_legacy_tags(self):
+        try:
+            cursor = self.db_connection.cursor()
+            try:
+                cursor.execute("ALTER TABLE Tags ADD COLUMN tag_type TEXT DEFAULT 'general'")
+                self.db_connection.commit()
+                print("Added 'tag_type' column to Tags table.")
+            except sqlite3.OperationalError:
+                pass 
+
+            cursor.execute("""
+                SELECT DISTINCT tag_name FROM Tags
+                WHERE tag_type IS NULL OR tag_type = '' OR tag_type = 'general'
+            """)
+            unresolved_tags = set(row[0] for row in cursor.fetchall() if row[0])
+            if not unresolved_tags:
+                return
+
+            db_folder = os.path.dirname(self.current_db_path)
+            alltags_db_path = os.path.join(db_folder, "AllTags.db")
+            if not os.path.exists(alltags_db_path):
+                return
+
+            all_conn = sqlite3.connect(alltags_db_path)
+            all_conn.execute("PRAGMA journal_mode=WAL;")
+            all_cursor = all_conn.cursor()
+
+            tables_to_ns = {
+                'CharacterTags': 'character',
+                'SeriesTags': 'series',
+                'ArtistTags': 'artist',
+                'MetadataTags': 'metadata'
+            }
+
+            updates_made = 0
+            for table, ns in tables_to_ns.items():
+                if not unresolved_tags:
+                    break
+
+                tags_list = list(unresolved_tags)
+                chunk_size = 900
+                found_in_table = set()
+
+                for i in range(0, len(tags_list), chunk_size):
+                    chunk = tags_list[i:i + chunk_size]
+                    placeholders = ",".join("?" * len(chunk))
+                    try:
+                        all_cursor.execute(
+                            f"SELECT name FROM {table} WHERE name IN ({placeholders})", chunk
+                        )
+                        for row in all_cursor.fetchall():
+                            tag = row[0]
+                            cursor.execute(
+                                "UPDATE Tags SET tag_type = ? WHERE tag_name = ?", (ns, tag)
+                            )
+                            updates_made += 1
+                            found_in_table.add(tag)
+                    except sqlite3.OperationalError:
+                        pass
+
+                unresolved_tags -= found_in_table
+
+            if updates_made > 0:
+                self.db_connection.commit()
+                print(f"Upgraded {updates_made} tags to their correct namespaces in library.db.")
+
+            all_conn.close()
+        except Exception as e:
+            print(f"WARN: Failed to upgrade legacy tags: {e}")
 
     def connect_to_database(self, db_path):
         """Establishes the SQLite connection and updates the UI."""
@@ -3073,45 +3424,34 @@ class MediaExplorerApp(QMainWindow):
             cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangas (manga_id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, cover_image TEXT)")
             cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangaPages (manga_id INTEGER, image_path TEXT, page_number INTEGER, PRIMARY KEY (manga_id, page_number))")
             cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangaTags (manga_id INTEGER, tag_name TEXT, PRIMARY KEY (manga_id, tag_name))")
+            
+            # Migrate Images table
+            try:
+                cursor.execute("ALTER TABLE Images ADD COLUMN file_size INTEGER")
+                print("Added 'file_size' column to Images table.")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+            # Migrate tagless table
+            try:
+                cursor.execute("ALTER TABLE tagless ADD COLUMN file_size INTEGER")
+                print("Added 'file_size' column to tagless table.")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
             self.db_connection.commit()
             
-            cursor.execute("SELECT tag_name FROM Tags")
-            all_tags = set([row[0] for row in cursor.fetchall()])
+            self.upgrade_legacy_tags()
             
-            try:
-                cursor.execute("SELECT DISTINCT artist FROM MangaGalleries WHERE artist IS NOT NULL AND artist != ''")
-                artists = [row[0] for row in cursor.fetchall()]
-                all_tags.update(artists)
-            except sqlite3.OperationalError:
-                pass
+            # Start background backfill worker for file sizes
+            if not hasattr(self, 'file_size_worker') or not self.file_size_worker.isRunning():
+                self.file_size_worker = FileSizeBackfillWorker(db_path)
+                self.file_size_worker.start()
                 
-            try:
-                char_db_path = os.path.join(self.current_db_folder, "characters.db")
-                if os.path.exists(char_db_path):
-                    char_conn = sqlite3.connect(char_db_path)
-                    char_conn.execute("PRAGMA journal_mode=WAL;")
-                    char_cursor = char_conn.cursor()
-                    char_cursor.execute("SELECT DISTINCT character_name FROM Characters")
-                    chars = [row[0] for row in char_cursor.fetchall()]
-                    all_tags.update(chars)
-                    char_conn.close()
-            except Exception:
-                pass
-                
-            try:
-                cursor.execute("SELECT DISTINCT tag_name FROM CustomMangaTags")
-                custom_tags = [row[0] for row in cursor.fetchall()]
-                all_tags.update(custom_tags)
-                
-                cursor.execute("SELECT DISTINCT title FROM CustomMangas WHERE title IS NOT NULL AND title != ''")
-                custom_titles = [row[0] for row in cursor.fetchall()]
-                all_tags.update(custom_titles)
-            except sqlite3.OperationalError:
-                pass
-                
-            all_tags = sorted(list(all_tags))
+            all_tags = self._get_categorized_tags()
             
             self.tag_completer = MultiTagCompleter(all_tags, self)
+            self.tag_completer.model().setStringList(all_tags)
             
             try:
                 current_scale = float(os.environ.get("QT_SCALE_FACTOR", "1.0"))
@@ -3140,6 +3480,7 @@ class MediaExplorerApp(QMainWindow):
             """)
             
             self.ui.search_bar.setCompleter(self.tag_completer)
+            self._install_ns_tab_filter(self.ui.search_bar)
 
             self.ui.btn_load_db.setText(" DB ACTIVE")
             self.ui.btn_load_db.setStyleSheet("""

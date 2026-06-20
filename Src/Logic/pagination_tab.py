@@ -47,29 +47,36 @@ class PaginationTab(QWidget):
 
     def load_tags_for_completer(self):
         try:
-            main_app = self.parent_dialog.parent()
-            all_tags = []
-            
-            if hasattr(main_app, 'tag_completer') and main_app.tag_completer:
-                all_tags = main_app.tag_completer.model().stringList()
-                
-            if not all_tags and self.db_path and os.path.exists(self.db_path):
-                try:
-                    conn = self.parent_dialog.shared_conn
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT tag_name FROM Tags")
-                    all_tags = [row[0] for row in cursor.fetchall() if row[0]]
-                except Exception as e:
-                    print(f"Failed to fetch tags independently: {e}")
-                
-            from Src.Logic.app import MultiTagCompleter
-            self.tag_completer = MultiTagCompleter(all_tags, self)
+            from Src.Logic.tags import DbLookupCompleter
+            from Src.Logic.app import NsTabExpander
+
+            # Resolve db paths so the completer can query AllTags.db and library.db
+            library_db = self.db_path or ""
+            alltags_db = ""
+            if library_db:
+                alltags_db = os.path.join(os.path.dirname(library_db), "AllTags.db")
+
+            # Search input completer (colored by category)
+            self.tag_completer = DbLookupCompleter(self)
+            self.tag_completer.set_db_paths(alltags_db, library_db)
             self.search_input.setCompleter(self.tag_completer)
+            self.search_input.textEdited.connect(self.tag_completer.on_text_changed)
             self.tag_completer.activated.connect(self.on_completer_activated)
-            
-            self.custom_tags_completer = MultiTagCompleter(all_tags, self)
+
+            # Ghost-text namespace expander for search input (char→character:, ser→series:, etc.)
+            self._search_expander = NsTabExpander(self.search_input, self)
+            self.search_input.installEventFilter(self._search_expander)
+
+            # Custom tags input completer (same colored autocomplete)
+            self.custom_tags_completer = DbLookupCompleter(self)
+            self.custom_tags_completer.set_db_paths(alltags_db, library_db)
             if hasattr(self, 'tags_input'):
                 self.tags_input.setCompleter(self.custom_tags_completer)
+                self.tags_input.textEdited.connect(self.custom_tags_completer.on_text_changed)
+
+                # Ghost-text namespace expander for custom tags input
+                self._tags_expander = NsTabExpander(self.tags_input, self)
+                self.tags_input.installEventFilter(self._tags_expander)
         except Exception as e:
             print(f"Completer error: {e}")
 

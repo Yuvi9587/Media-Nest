@@ -1,0 +1,8 @@
+Pillow
+PyQt6
+opencv-python
+ImageHash
+numpy
+onnxruntime
+requests
+Send2Trash

@@ -258,14 +258,26 @@ class SettingsDialog(QDialog):
         self.btn_browse = QPushButton("Browse...")
         self.btn_browse.clicked.connect(self.browse_folder)
         db_row.addWidget(self.btn_browse)
+        
+        self.btn_download_tags = QPushButton("Download 1.6M Tags DB")
+        self.btn_download_tags.setToolTip("Downloads AllTags.db from Hugging Face to enable advanced autocomplete.")
+        self.btn_download_tags.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_download_tags.clicked.connect(self.download_alltags_db)
+        db_row.addWidget(self.btn_download_tags)
+        
         db_inner_layout.addLayout(db_row)
+        
+        self.pb_download_tags = QProgressBar()
+        self.pb_download_tags.setFixedHeight(4)
+        self.pb_download_tags.setTextVisible(False)
+        self.pb_download_tags.setVisible(False)
+        db_inner_layout.addWidget(self.pb_download_tags)
+
         db_group.setLayout(db_inner_layout)
         db_layout.addWidget(db_group)
 
         self.db_repair_tab = DbRepairTab(self)
         db_layout.addWidget(self.db_repair_tab, stretch=1)
-
-
 
         ui_layout = QVBoxLayout(self.tab_interface)
         ui_group = QGroupBox("Visual & Performance Settings")
@@ -1356,6 +1368,17 @@ class SettingsDialog(QDialog):
 
         conn.commit()
 
+        conn.commit()
+
+        if snapshot.get('is_global'):
+            if not self.undo_stack:
+                self.btn_undo.setVisible(False)
+            else:
+                self.btn_undo.setText(f"Undo Last Action ({len(self.undo_stack)})")
+            self.lbl_dedupe_status.setText("Action undone successfully.")
+            self.start_dedupe_scan(is_auto_rescan=True)
+            return
+
         card_index = snapshot['card_index']
         group_data = snapshot['group_data_snapshot']
         group_card_ref = snapshot.get('group_card_ref')
@@ -1714,6 +1737,7 @@ class SettingsDialog(QDialog):
             self.delete_queue = files_to_delete
             self.total_to_delete = len(files_to_delete)
             self.deleted_count = 0
+            self.global_deleted_files_info = []
             self.btn_auto_delete.setEnabled(False)
             self.btn_scan_dupes.setEnabled(False)
             self.pb_dedupe.setVisible(True)
@@ -1729,6 +1753,16 @@ class SettingsDialog(QDialog):
             self.delete_conn.commit()
             self.pb_dedupe.setVisible(False)
 
+            if getattr(self, 'is_global_delete', False) and getattr(self, 'global_deleted_files_info', []):
+                self.push_undo_action({
+                    'type': 'delete',
+                    'files': self.global_deleted_files_info,
+                    'group_data_snapshot': None,
+                    'card_index': -1,
+                    'is_group_removed': True,
+                    'is_global': True
+                })
+
             if not getattr(self, 'skip_group_auto_delete_confirm', False) and getattr(self, 'is_global_delete', False):
                 QMessageBox.information(self, "Success", f"Moved {self.deleted_count} files to the Recycle Bin!")
 
@@ -1743,11 +1777,21 @@ class SettingsDialog(QDialog):
 
         for path in chunk:
             try:
-                if os.path.exists(path): send2trash(path)
-                self.delete_cursor.execute("DELETE FROM Images WHERE file_path = ?", (path,))
-                self.deleted_count += 1
-            except Exception:
-                pass
+                self.delete_cursor.execute("SELECT * FROM Images WHERE file_path = ?", (path,))
+                row = self.delete_cursor.fetchone()
+                if row and os.path.exists(path):
+                    trash_path = os.path.join(self.undo_trash_dir, str(uuid.uuid4()) + os.path.splitext(path)[1])
+                    shutil.move(path, trash_path)
+                    
+                    if hasattr(self, 'global_deleted_files_info'):
+                        self.global_deleted_files_info.append({
+                            'original_path': path, 'trash_path': trash_path, 'db_row': row
+                        })
+                        
+                    self.delete_cursor.execute("DELETE FROM Images WHERE file_path = ?", (path,))
+                    self.deleted_count += 1
+            except Exception as e:
+                print(f"Global auto delete failed for {path}: {e}")
 
         self.delete_conn.commit()
         self.pb_dedupe.setValue(self.deleted_count)
@@ -1990,3 +2034,57 @@ class SettingsDialog(QDialog):
         self.flush_undo_trash()
         self._close_shared_db()
         super().accept()
+
+    def download_alltags_db(self):
+        target_folder = self.db_path_input.text().strip()
+        if not target_folder or not os.path.exists(target_folder):
+            QMessageBox.warning(self, "Invalid Folder", "Please select a valid Library Folder first.")
+            return
+
+        db_path = os.path.join(target_folder, "AllTags.db")
+        if os.path.exists(db_path):
+            reply = QMessageBox.question(self, "Database Exists", "AllTags.db already exists. Do you want to redownload it?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.No:
+                return
+
+        url = "https://huggingface.co/datasets/Yuvi9587/Database/resolve/main/AllTags.db"
+        import requests
+        try:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            self.btn_download_tags.setText("Downloading...")
+            self.btn_download_tags.setEnabled(False)
+            self.pb_download_tags.setVisible(True)
+            self.pb_download_tags.setValue(0)
+            QApplication.processEvents()
+            
+            response = requests.get(url, stream=True, timeout=30)
+            response.raise_for_status()
+            total_size = int(response.headers.get('content-length', 0))
+            
+            with open(db_path, 'wb') as f:
+                downloaded = 0
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0:
+                            percent = int((downloaded / total_size) * 100)
+                            self.pb_download_tags.setValue(percent)
+                            # processEvents is needed so the UI actually updates
+                            QApplication.processEvents()
+                
+            QApplication.restoreOverrideCursor()
+            self.btn_download_tags.setText("Download 1.6M Tags DB")
+            self.btn_download_tags.setEnabled(True)
+            self.pb_download_tags.setVisible(False)
+            QMessageBox.information(self, "Download Complete", "AllTags.db has been successfully downloaded!")
+            
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            self.btn_download_tags.setText("Download 1.6M Tags DB")
+            self.btn_download_tags.setEnabled(True)
+            self.pb_download_tags.setVisible(False)
+            QMessageBox.warning(
+                self, "Download Warning", 
+                f"Could not download 'AllTags.db'.\\n\\nError: {e}"
+            )

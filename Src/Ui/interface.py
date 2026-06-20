@@ -667,7 +667,9 @@ class MainWindowUI:
             QPushButton:hover { background-color: #505050; }
         """)
 
-        self.btn_detach = QPushButton("⧉") 
+        self.btn_detach = QPushButton() 
+        self.btn_detach.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "detach.svg"))))
+        self.btn_detach.setIconSize(QSize(20, 20))
         self.btn_detach.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_detach.setFixedSize(45, 45)
         self.btn_detach.setToolTip("Detach Viewer (Multi-Monitor)")

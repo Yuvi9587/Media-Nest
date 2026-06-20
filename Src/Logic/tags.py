@@ -9,14 +9,16 @@ import imagehash
 import time
 import uuid
 from PIL import Image
+Image.MAX_IMAGE_PIXELS = None
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QLineEdit, QPushButton, QGroupBox, QListWidget,
                              QFileDialog, QMessageBox, QCompleter, QListWidgetItem,
                              QSplitter, QSizePolicy, QApplication, QDialog,
                              QProgressBar, QRadioButton, QButtonGroup, QCheckBox,
-                             QPlainTextEdit, QStackedWidget, QSlider)
-from PyQt6.QtCore import Qt, QStringListModel, QThread, pyqtSignal, QSize, QUrl, QTimer, QSettings
-from PyQt6.QtGui import QPixmap, QImageReader, QMovie, QIcon, QColor
+                             QPlainTextEdit, QStackedWidget, QSlider, QStyledItemDelegate,
+                             QStyle)
+from PyQt6.QtCore import Qt, QStringListModel, QThread, pyqtSignal, QSize, QUrl, QTimer, QSettings, QRect, QPoint
+from PyQt6.QtGui import QPixmap, QImageReader, QMovie, QIcon, QColor, QPainter, QFont
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 from Src.Logic.paths import resource_path
@@ -251,22 +253,207 @@ class UniversalMediaViewer(QWidget):
         self.stack.setCurrentIndex(0)
         self.image_label.clear_image(text)
 
-class MultiTagCompleter(QCompleter):
-    def __init__(self, parent=None):
-        super().__init__(parent)
+# ── Namespace colour palette ────────────────────────────────────────────────
+NS_COLORS = {
+    'character': QColor('#c792ea'),   # purple
+    'artist':    QColor('#82aaff'),   # blue
+    'series':    QColor('#ffcb6b'),   # gold
+    'general':   QColor('#c3e88d'),   # green
+    'metadata':  QColor('#f78c6c'),   # orange
+}
+NS_BG = {
+    'character': QColor(60, 30, 80, 160),
+    'artist':    QColor(20, 50, 100, 160),
+    'series':    QColor(80, 60, 10, 160),
+    'general':   QColor(30, 70, 30, 160),
+    'metadata':  QColor(90, 40, 10, 160),
+}
 
+
+class NsColorModel(QStringListModel):
+    """QStringListModel that returns namespace-based foreground/background colours
+    via Qt's standard data roles — works reliably even when a QSS stylesheet is set."""
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        # Raw stored value is always "ns:tagname"
+        raw = super().data(index, Qt.ItemDataRole.DisplayRole) or ""
+        ns = raw.split(':', 1)[0] if ':' in raw else 'general'
+
+        if role == Qt.ItemDataRole.ForegroundRole:
+            return NS_COLORS.get(ns, QColor('#cccccc'))
+
+        if role == Qt.ItemDataRole.BackgroundRole:
+            return NS_BG.get(ns, QColor(40, 40, 40, 180))
+
+        # UserRole: return the raw "ns:tag" string for pathFromIndex
+        if role == Qt.ItemDataRole.UserRole:
+            return raw
+
+        # DisplayRole: show a short badge prefix so the user can see the namespace
+        if role == Qt.ItemDataRole.DisplayRole:
+            if ':' in raw:
+                ns_part, tag_part = raw.split(':', 1)
+                return f"[{ns_part.upper()[:4]}]  {tag_part}"
+            return raw
+
+        return super().data(index, role)
+
+
+class DbLookupCompleter(QCompleter):
+    """Fast completer that queries AllTags.db directly on each keystroke (debounced).
+    Never loads 1.6M tags into memory — returns only the top 25 matches."""
+
+    def __init__(self, parent=None):
+        self._result_model = NsColorModel()
+        super().__init__(self._result_model, parent)
+        self.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.setFilterMode(Qt.MatchFlag.MatchContains)  # safe: model only has 25 items
+        self.setMaxVisibleItems(12)
+
+        self._alltags_db = None
+        self._library_db = None
+        self._debounce = QTimer()
+        self._debounce.setSingleShot(True)
+        self._debounce.setInterval(180)   # ms after last keystroke
+        self._debounce.timeout.connect(self._do_lookup)
+        self._last_term = ""
+
+    def _apply_popup_style(self):
+        popup = self.popup()
+        if not popup:
+            return
+        popup.setStyleSheet("""
+            QListView {
+                background-color: #1e1e2e;
+                border: 1px solid #44475a;
+                border-radius: 6px;
+                padding: 2px;
+                outline: none;
+                font-size: 9pt;
+            }
+            QListView::item {
+                padding: 3px 6px;
+                border-radius: 3px;
+            }
+            QListView::item:selected {
+                background-color: #2a2d3e;
+            }
+            QScrollBar:vertical {
+                background: #2a2d3e;
+                width: 6px;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:vertical {
+                background: #44475a;
+                border-radius: 3px;
+            }
+        """)
+
+    def set_db_paths(self, alltags_db, library_db):
+        self._alltags_db = alltags_db
+        self._library_db = library_db
+
+    def on_text_changed(self, text):
+        """Call this from the widget's textChanged signal."""
+        # Extract the last token (after the last comma)
+        last = text.split(',')[-1].strip() if ',' in text else text.strip()
+        # Strip namespace prefix for the DB search term
+        term = last.split(':', 1)[1].strip() if ':' in last else last
+        if len(term) < 2:
+            self._result_model.setStringList([])
+            return
+        self._last_term = term
+        self._debounce.start()
+
+    def _do_lookup(self):
+        term = self._last_term
+        if len(term) < 2:
+            return
+        results = []
+        tables_to_ns = [
+            ('CharacterTags', 'character'),
+            ('ArtistTags',    'artist'),
+            ('SeriesTags',    'series'),
+            ('GeneralTags',   'general'),
+            ('MetadataTags',  'metadata'),
+        ]
+        # Query AllTags.db
+        if self._alltags_db and os.path.exists(self._alltags_db):
+            try:
+                conn = sqlite3.connect(self._alltags_db)
+                conn.execute("PRAGMA journal_mode=WAL;")
+                cur = conn.cursor()
+                for table, ns in tables_to_ns:
+                    try:
+                        cur.execute(f"SELECT name FROM {table} WHERE name LIKE ? LIMIT 5",
+                                    (f'%{term}%',))
+                        for (name,) in cur.fetchall():
+                            results.append(f"{ns}:{name}")
+                    except sqlite3.OperationalError:
+                        pass
+                conn.close()
+            except Exception:
+                pass
+        # Also query library.db Tags for locally known tags not in AllTags.db
+        if self._library_db and os.path.exists(self._library_db):
+            try:
+                conn = sqlite3.connect(self._library_db)
+                conn.execute("PRAGMA journal_mode=WAL;")
+                cur = conn.cursor()
+                try:
+                    cur.execute(
+                        "SELECT tag_name, tag_type FROM Tags WHERE tag_name LIKE ? LIMIT 10",
+                        (f'%{term}%',))
+                    for (name, ns) in cur.fetchall():
+                        ns = ns or 'general'
+                        entry = f"{ns}:{name}"
+                        if entry not in results:
+                            results.append(entry)
+                except sqlite3.OperationalError:
+                    pass
+                conn.close()
+            except Exception:
+                pass
+        self._result_model.setStringList(results[:25])
+        if results and self.widget():
+            self.complete()
+
+    def showPopup(self):
+        super().showPopup()
+        popup = self.popup()
+        widget = self.widget()
+        if popup and widget:
+            global_pos = widget.mapToGlobal(QPoint(0, widget.height()))
+            popup.move(global_pos)
+            popup.setFixedWidth(max(widget.width(), 320))
+            self._apply_popup_style()
+
+    # --- multi-tag support ---
     def pathFromIndex(self, index):
-        path = super().pathFromIndex(index)
-        text = self.widget().text()
+        # The model's DisplayRole returns "[CHAR]  tagname" — we want the raw "character:tagname"
+        raw = self._result_model.data(index, Qt.ItemDataRole.UserRole) or ""
+        if not raw:
+            # Fall back: reconstruct from display text
+            display = super().pathFromIndex(index)
+            # Strip "[XXXX]  " badge prefix if present
+            import re
+            display = re.sub(r'^\[[A-Z]+\]\s+', '', display)
+            raw = display
+        text = self.widget().text() if self.widget() else ""
         if ',' in text:
             prefix = text[:text.rfind(',') + 1]
-            return prefix + " " + path
-        return path
+            return prefix + " " + raw
+        return raw
 
     def splitPath(self, path):
         if ',' in path:
             return [path.split(',')[-1].strip()]
-        return [path]
+        return [path.strip()]
+
+
+# Keep old name as alias so nothing else breaks
+MultiTagCompleter = DbLookupCompleter
+
 
 
 class PersistentCloudWorker(QThread):
@@ -478,8 +665,9 @@ class ImportFolderThread(QThread):
                             except Exception as e:
                                 self.log_msg.emit(f"IMPORT WARN: Could not calculate phash for {file_name}")
 
-                        cursor.execute("INSERT INTO tagless (hash, file_path, file_name, phash) VALUES (?, ?, ?, ?)",
-                                       (file_hash, file_path, file_name, phash_value))
+                        file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+                        cursor.execute("INSERT INTO tagless (hash, file_path, file_name, phash, file_size) VALUES (?, ?, ?, ?, ?)",
+                                       (file_hash, file_path, file_name, phash_value, file_size))
                         imported += 1
                         self.item_imported.emit(file_name, file_path, file_hash)
                 except Exception as file_e:
@@ -578,6 +766,291 @@ class ModelDownloadDialog(QDialog):
             self.reject()
 
 
+class TaglessInboxLoaderWorker(QThread):
+    """Fetches tagless file records from the DB and validates paths off the main thread."""
+    # (valid_rows, invalid_hashes) where valid_rows = [(file_name, file_path, file_hash), ...]
+    finished = pyqtSignal(list, list)
+
+    def __init__(self, library_db):
+        super().__init__()
+        self.library_db = library_db
+
+    def run(self):
+        valid_rows = []
+        invalid_hashes = []
+        try:
+            conn = sqlite3.connect(self.library_db)
+            conn.execute("PRAGMA journal_mode=WAL;")
+            cursor = conn.cursor()
+
+            # Deduplicate tagless table
+            cursor.execute("""
+                DELETE FROM tagless
+                WHERE rowid NOT IN (
+                    SELECT MIN(rowid) FROM tagless GROUP BY hash
+                )
+            """)
+            conn.commit()
+
+            cursor.execute("SELECT file_name, file_path, hash FROM tagless ORDER BY file_name ASC")
+            rows = cursor.fetchall()
+            conn.close()
+
+            for file_name, file_path, file_hash in rows:
+                if not file_path or not os.path.exists(file_path):
+                    invalid_hashes.append(file_hash)
+                else:
+                    valid_rows.append((file_name, file_path, file_hash))
+        except Exception:
+            pass
+
+        self.finished.emit(valid_rows, invalid_hashes)
+
+
+
+class GlobalTagLoaderWorker(QThread):
+    """Loads all tags from AllTags.db, library.db, and characters.db in the
+    background so the main UI thread never freezes, even with 1.6M tags."""
+    finished = pyqtSignal(list, set)   # (combined_list, known_gelbooru_chars)
+
+    def __init__(self, library_db, characters_db, alltags_db):
+        super().__init__()
+        self.library_db = library_db
+        self.characters_db = characters_db
+        self.alltags_db = alltags_db
+
+    def run(self):
+        tag_dict = {}
+        known_chars = set()
+
+        def normalize_tag(t): return str(t).strip().lower().replace(" ", "_")
+        def add_tag(name, ns):
+            prio = {'character': 5, 'artist': 4, 'series': 3, 'metadata': 2, 'general': 1}
+            if name not in tag_dict or prio.get(ns, 1) > prio.get(tag_dict.get(name, 'general'), 1):
+                tag_dict[name] = ns
+
+        # 1. library.db tags
+        if os.path.exists(self.library_db):
+            try:
+                conn = sqlite3.connect(self.library_db)
+                conn.execute("PRAGMA journal_mode=WAL;")
+                cursor = conn.cursor()
+                try:
+                    cursor.execute("SELECT tag_name, tag_type FROM Tags")
+                    for row in cursor.fetchall():
+                        if row[0]: add_tag(normalize_tag(row[0]), row[1] if row[1] else 'general')
+                except sqlite3.OperationalError:
+                    cursor.execute("SELECT tag_name FROM Tags")
+                    for row in cursor.fetchall():
+                        if row[0]: add_tag(normalize_tag(row[0]), 'general')
+                conn.close()
+            except Exception:
+                pass
+
+        # 2. AllTags.db — the big one, done on background thread
+        if os.path.exists(self.alltags_db):
+            try:
+                conn = sqlite3.connect(self.alltags_db)
+                conn.execute("PRAGMA journal_mode=WAL;")
+                cursor = conn.cursor()
+                tables_to_ns = {
+                    'CharacterTags': 'character',
+                    'ArtistTags':    'artist',
+                    'SeriesTags':    'series',
+                    'GeneralTags':   'general',
+                    'MetadataTags':  'metadata',
+                }
+                for table, ns in tables_to_ns.items():
+                    try:
+                        cursor.execute(f"SELECT name FROM {table}")
+                        for (name,) in cursor.fetchall():
+                            if name:
+                                clean = normalize_tag(name)
+                                add_tag(clean, ns)
+                                if ns == 'character':
+                                    known_chars.add(clean)
+                    except sqlite3.OperationalError:
+                        pass
+                conn.close()
+            except Exception:
+                pass
+
+        # 3. characters.db
+        if os.path.exists(self.characters_db):
+            try:
+                conn = sqlite3.connect(self.characters_db)
+                conn.execute("PRAGMA journal_mode=WAL;")
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                tables = [t[0] for t in cursor.fetchall()]
+                if tables:
+                    target_table = "characters" if "characters" in tables else tables[0]
+                    cursor.execute(f"PRAGMA table_info({target_table})")
+                    columns = [col[1] for col in cursor.fetchall()]
+                    if columns:
+                        col_name = "character_name" if "character_name" in columns else columns[0]
+                        col_alias = "raw_string" if "raw_string" in columns else (columns[1] if len(columns) > 1 else None)
+                        if col_alias:
+                            cursor.execute(f"SELECT {col_name}, {col_alias} FROM {target_table}")
+                            for c_name, r_str in cursor.fetchall():
+                                if c_name:
+                                    cn = normalize_tag(c_name)
+                                    add_tag(cn, 'character'); known_chars.add(cn)
+                                if r_str:
+                                    alias_part = str(r_str)
+                                    if '=' in alias_part: alias_part = alias_part.split('=', 1)[1]
+                                    for alias in alias_part.split(','):
+                                        ca = normalize_tag(alias)
+                                        if ca and ca not in known_chars:
+                                            add_tag(ca, 'character'); known_chars.add(ca)
+                        else:
+                            cursor.execute(f"SELECT {col_name} FROM {target_table}")
+                            for (c_name,) in cursor.fetchall():
+                                if c_name:
+                                    cn = normalize_tag(c_name)
+                                    add_tag(cn, 'character'); known_chars.add(cn)
+                conn.close()
+            except Exception:
+                pass
+
+        def sort_key(item):
+            name, ns = item
+            ns_prio = {'character': 1, 'series': 2, 'artist': 3, 'metadata': 4, 'general': 5}
+            return (ns_prio.get(ns, 99), name)
+
+        combined = [f"{ns}:{name}" for name, ns in sorted(tag_dict.items(), key=sort_key)]
+        self.finished.emit(combined, known_chars)
+
+
+class CopyTagsDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Copy Tags From...")
+        self.setFixedSize(300, 300)
+        self.setStyleSheet("background-color: #1e1e1e; color: white;")
+        
+        layout = QVBoxLayout(self)
+        
+        top_layout = QHBoxLayout()
+        lbl = QLabel("Select tag categories to copy:")
+        lbl.setStyleSheet("font-weight: bold; font-size: 14px;")
+        top_layout.addWidget(lbl)
+        
+        btn_help = QPushButton("?")
+        btn_help.setFixedSize(24, 24)
+        btn_help.setStyleSheet("background-color: #3e3e42; color: white; border-radius: 12px; font-weight: bold; font-size: 14px;")
+        btn_help.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_help.clicked.connect(self.show_help)
+        top_layout.addWidget(btn_help)
+        top_layout.addStretch()
+        
+        layout.addLayout(top_layout)
+        
+        self.cb_series = QCheckBox("Series (series:)")
+        self.cb_chars = QCheckBox("Characters (character:)")
+        self.cb_artist = QCheckBox("Artist (artist:)")
+        self.cb_meta = QCheckBox("Metadata (metadata:)")
+        self.cb_general = QCheckBox("General Tags")
+        
+        from PyQt6.QtCore import QSettings
+        self.settings = QSettings("MediaNest", "AppConfig")
+        
+        s_series = self.settings.value("copy_tags_cb_series", True, type=bool)
+        s_chars = self.settings.value("copy_tags_cb_chars", True, type=bool)
+        s_artist = self.settings.value("copy_tags_cb_artist", True, type=bool)
+        s_meta = self.settings.value("copy_tags_cb_meta", True, type=bool)
+        s_general = self.settings.value("copy_tags_cb_general", True, type=bool)
+        
+        self.cb_series.setChecked(s_series)
+        self.cb_chars.setChecked(s_chars)
+        self.cb_artist.setChecked(s_artist)
+        self.cb_meta.setChecked(s_meta)
+        self.cb_general.setChecked(s_general)
+        
+        for cb in [self.cb_series, self.cb_chars, self.cb_artist, self.cb_meta, self.cb_general]:
+            cb.setStyleSheet("font-size: 13px; padding: 5px;")
+            layout.addWidget(cb)
+            
+        layout.addSpacing(10)
+        
+        shortcut_lbl = QLabel("Activation Shortcut:")
+        shortcut_lbl.setStyleSheet("font-size: 13px;")
+        
+        from PyQt6.QtWidgets import QKeySequenceEdit
+        from PyQt6.QtGui import QKeySequence
+        
+        self.shortcut_edit = QKeySequenceEdit(self)
+        current_shortcut = self.settings.value("copy_tags_shortcut", "Ctrl+Shift+C", type=str)
+        self.shortcut_edit.setKeySequence(QKeySequence(current_shortcut))
+        
+        shortcut_layout = QHBoxLayout()
+        shortcut_layout.addWidget(shortcut_lbl)
+        shortcut_layout.addWidget(self.shortcut_edit)
+        
+        layout.addLayout(shortcut_layout)
+            
+        btn_layout = QHBoxLayout()
+        self.btn_start = QPushButton("Start Copying")
+        self.btn_start.setStyleSheet("background-color: #007acc; color: white; padding: 8px; border-radius: 4px; font-weight: bold;")
+        self.btn_start.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_start.clicked.connect(self.accept)
+        
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_cancel.setStyleSheet("background-color: #3e3e42; color: white; padding: 8px; border-radius: 4px;")
+        self.btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_cancel.clicked.connect(self.reject)
+        
+        btn_layout.addWidget(self.btn_cancel)
+        btn_layout.addWidget(self.btn_start)
+        
+        layout.addStretch()
+        layout.addLayout(btn_layout)
+
+    def accept(self):
+        new_shortcut = self.shortcut_edit.keySequence().toString()
+        if new_shortcut:
+            self.settings.setValue("copy_tags_shortcut", new_shortcut)
+            
+        self.settings.setValue("copy_tags_cb_series", self.cb_series.isChecked())
+        self.settings.setValue("copy_tags_cb_chars", self.cb_chars.isChecked())
+        self.settings.setValue("copy_tags_cb_artist", self.cb_artist.isChecked())
+        self.settings.setValue("copy_tags_cb_meta", self.cb_meta.isChecked())
+        self.settings.setValue("copy_tags_cb_general", self.cb_general.isChecked())
+        
+        super().accept()
+
+    def show_help(self):
+        from PyQt6.QtWidgets import QMessageBox
+        help_text = (
+            "<h3>How to use Copy From</h3>"
+            "<p>This feature allows you to clone specific tags from one file onto many other files quickly.</p>"
+            "<ol>"
+            "<li>Select the tag categories you want to copy here.</li>"
+            "<li>Click <b>Start Copying</b>.</li>"
+            "<li>Click on the <b>Source</b> file in the grid that contains the tags you want to copy.</li>"
+            "<li>Now, click on any other files in the grid to instantly paste those tags onto them!</li>"
+            "</ol>"
+            "<p><b>Example:</b> You have 5 pictures of Goku. Tag the first picture manually with <code>character:goku</code> and <code>series:dragon ball</code>. "
+            "Then press your Activation Shortcut, click Start Copying, click the first picture, and then quickly click the other 4 pictures to instantly tag them all!</p>"
+        )
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Copy Tags Help")
+        msg.setText(help_text)
+        msg.setStyleSheet("background-color: #1e1e1e; color: white;")
+        msg.exec()
+
+    def get_selected_namespaces(self):
+        ns = []
+        if self.cb_series.isChecked(): ns.append('series:')
+        if self.cb_chars.isChecked(): ns.append('character:')
+        if self.cb_artist.isChecked(): ns.append('artist:')
+        if self.cb_meta.isChecked(): ns.append('metadata:')
+        if self.cb_general.isChecked(): 
+            ns.append('general:')
+            ns.append('')
+        return ns
+
+
 class TagManagerTab(QWidget):
     log_signal = pyqtSignal(str)
 
@@ -592,6 +1065,20 @@ class TagManagerTab(QWidget):
         self.known_gelbooru_chars = set()
         self.pending_cloud_matches = {}
 
+        self.copy_tags_mode = None 
+        self.copy_tags_namespaces = []
+        self.copy_tags_source_tags = []
+        
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        from PyQt6.QtCore import QSettings
+        settings = QSettings("MediaNest", "AppConfig")
+        current_shortcut = settings.value("copy_tags_shortcut", "Ctrl+Shift+C", type=str)
+        self.shortcut_copy_tags = QShortcut(QKeySequence(current_shortcut), self)
+        self.shortcut_copy_tags.activated.connect(self.start_copy_tags_workflow)
+        
+        self.shortcut_cancel_copy = QShortcut(QKeySequence("Esc"), self)
+        self.shortcut_cancel_copy.activated.connect(self.cancel_copy_tags_workflow)
+
         self.log_signal.connect(self.append_log_to_console)
 
         self.setup_ui()
@@ -601,9 +1088,16 @@ class TagManagerTab(QWidget):
         self.pending_cloud_matches = {}
         self.pending_tag_changes = {}
         self.pending_renames = {}
+        self._retiring_workers = []   # keeps old workers alive until their thread exits
 
+        from Src.Logic.app import SingleThumbnailThread, VideoThumbnailer, NsTabExpander
 
-        from Src.Logic.app import SingleThumbnailThread, VideoThumbnailer
+        self._search_expander = NsTabExpander(self.search_bar, self)
+        self.search_bar.installEventFilter(self._search_expander)
+
+        self._add_tag_expander = NsTabExpander(self.input_add_tag, self)
+        self.input_add_tag.installEventFilter(self._add_tag_expander)
+
         self.thumb_worker = SingleThumbnailThread(perf_mode="balanced")
         self.thumb_worker.thumbnail_ready.connect(self.on_thumbnail_ready)
         self.thumb_worker.start()
@@ -663,6 +1157,45 @@ class TagManagerTab(QWidget):
         scrollbar = self.console.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
+    def start_copy_tags_workflow(self):
+        if self.copy_tags_mode is not None:
+            self.cancel_copy_tags_workflow()
+            return
+            
+        dialog = CopyTagsDialog(self)
+        if dialog.exec():
+            from PyQt6.QtCore import QSettings
+            from PyQt6.QtGui import QKeySequence
+            settings = QSettings("MediaNest", "AppConfig")
+            new_shortcut = settings.value("copy_tags_shortcut", "Ctrl+Shift+C", type=str)
+            self.shortcut_copy_tags.setKey(QKeySequence(new_shortcut))
+            
+            if hasattr(self, 'btn_copy_tags'):
+                self.btn_copy_tags.setToolTip(f"Activate Copy Mode to clone specific tags to other items. (Shortcut: {new_shortcut})")
+            
+            self.copy_tags_namespaces = dialog.get_selected_namespaces()
+            if not self.copy_tags_namespaces:
+                self.log("Copy mode cancelled: No namespaces selected.")
+                return
+                
+            self.copy_tags_mode = "SELECT_SOURCE"
+            self.inbox_list_widget.setCursor(Qt.CursorShape.CrossCursor)
+            if hasattr(self, 'btn_copy_tags'):
+                self.btn_copy_tags.setText("Cancel (Esc)")
+                self.btn_copy_tags.setStyleSheet("QPushButton { background-color: #d32f2f; color: white; border-radius: 4px; padding: 5px; font-weight: bold; } QPushButton:hover { background-color: #f44336; }")
+            self.log("COPY MODE ACTIVE: Click an item in the grid to select it as the SOURCE.")
+            
+    def cancel_copy_tags_workflow(self):
+        if self.copy_tags_mode is not None:
+            self.copy_tags_mode = None
+            self.copy_tags_namespaces = []
+            self.copy_tags_source_tags = []
+            self.inbox_list_widget.setCursor(Qt.CursorShape.ArrowCursor)
+            if hasattr(self, 'btn_copy_tags'):
+                self.btn_copy_tags.setText("Copy From")
+                self.btn_copy_tags.setStyleSheet("QPushButton { background-color: #007acc; color: white; border-radius: 4px; padding: 5px; font-weight: bold; } QPushButton:hover { background-color: #0098ff; }")
+            self.log("Copy Mode Cancelled.")
+
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(10, 10, 10, 10)
@@ -686,10 +1219,9 @@ class TagManagerTab(QWidget):
 
         self.search_bar.textChanged.connect(self.search_timer.start)
         self.search_bar.returnPressed.connect(self.search_library_by_tag)
-        self.search_completer = MultiTagCompleter()
-        self.search_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self.search_completer.setModel(self.tag_completer_model)
+        self.search_completer = DbLookupCompleter()
         self.search_bar.setCompleter(self.search_completer)
+        self.search_bar.textEdited.connect(self.search_completer.on_text_changed)
         inbox_layout.addWidget(self.search_bar)
 
         self.btn_import_folder = QPushButton("Import External Folder")
@@ -768,6 +1300,8 @@ class TagManagerTab(QWidget):
             QListWidget::item { padding: 5px; }
             QListWidget::item:hover { background-color: #3e3e42; border-radius: 3px; }
         """)
+        self.file_tag_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.file_tag_list.customContextMenuRequested.connect(self.show_tag_context_menu)
 
         add_tag_layout = QHBoxLayout()
         add_tag_layout.setSpacing(8)
@@ -777,11 +1311,10 @@ class TagManagerTab(QWidget):
         self.input_add_tag.setPlaceholderText("Add tag manually...")
         self.input_add_tag.setStyleSheet("border-radius: 4px; padding-left: 8px;")
 
-        self.tag_completer = MultiTagCompleter()
-        self.tag_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self.tag_completer.setModel(self.tag_completer_model)
-        self.tag_completer.setMaxVisibleItems(10)
+        self.tag_completer = DbLookupCompleter()
+        self.tag_completer.setMaxVisibleItems(12)
         self.input_add_tag.setCompleter(self.tag_completer)
+        self.input_add_tag.textEdited.connect(self.tag_completer.on_text_changed)
 
         self.btn_add_tag = QPushButton()
         self.btn_add_tag.setFixedHeight(34)
@@ -804,13 +1337,28 @@ class TagManagerTab(QWidget):
         add_tag_layout.addWidget(self.btn_add_tag)
         add_tag_layout.addWidget(self.btn_auto_tag)
 
-        self.btn_remove_file_tag = QPushButton("Delete Selected Active Tag")
+        action_btn_layout = QHBoxLayout()
+
+        self.btn_remove_file_tag = QPushButton("Delete")
         self.btn_remove_file_tag.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "remove.svg"))))
         self.btn_remove_file_tag.clicked.connect(self.delete_checked_tags)
 
+        from PyQt6.QtCore import QSettings
+        current_shortcut = QSettings("MediaNest", "AppConfig").value("copy_tags_shortcut", "Ctrl+Shift+C", type=str)
+        
+        self.btn_copy_tags = QPushButton("Copy From")
+        self.btn_copy_tags.setToolTip(f"Activate Copy Mode to clone specific tags to other items. (Shortcut: {current_shortcut})")
+        self.btn_copy_tags.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "copy.svg"))))
+        self.btn_copy_tags.clicked.connect(self.start_copy_tags_workflow)
+        self.btn_copy_tags.setStyleSheet("QPushButton { background-color: #007acc; color: white; border-radius: 4px; padding: 5px; font-weight: bold; } QPushButton:hover { background-color: #0098ff; }")
+        self.btn_copy_tags.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        action_btn_layout.addWidget(self.btn_remove_file_tag)
+        action_btn_layout.addWidget(self.btn_copy_tags)
+
         active_tags_layout.addWidget(self.file_tag_list)
         active_tags_layout.addLayout(add_tag_layout)
-        active_tags_layout.addWidget(self.btn_remove_file_tag)
+        active_tags_layout.addLayout(action_btn_layout)
         active_tags_group.setLayout(active_tags_layout)
 
         col2_layout.addWidget(active_tags_group)
@@ -937,71 +1485,52 @@ class TagManagerTab(QWidget):
         self.import_progress.hide()
         if imported != -1: self.refresh_tagless_inbox()
 
+    def _retire_worker(self, worker):
+        """Disconnect the worker's custom signal, keep the Python object alive until
+        the OS thread actually exits, then drop the reference automatically."""
+        try:
+            worker.finished.disconnect()
+        except Exception:
+            pass
+        self._retiring_workers.append(worker)
+        # QThread emits its own built-in finished() when the OS thread is truly done
+        worker.finished.connect(lambda: self._retiring_workers.remove(worker)
+                                if worker in self._retiring_workers else None)
+        worker.quit()
+
     def refresh_global_tags(self):
         library_db, characters_db = self.get_db_paths()
-        all_tags = []
-        char_tags = []
 
-        def normalize_tag(t): return str(t).strip().lower().replace(" ", "_")
+        settings = QSettings("MediaNest", "AppConfig")
+        db_folder = settings.value("db_folder_path", "", type=str)
+        alltags_db = os.path.join(db_folder, "AllTags.db")
 
-        if os.path.exists(library_db):
-            try:
-                conn = self.settings_dialog.shared_conn
-                cursor = conn.cursor()
-                cursor.execute("SELECT tag_name FROM Tags")
-                all_tags = [normalize_tag(row[0]) for row in cursor.fetchall() if row[0]]
-            except Exception: pass
+        # Add Tag completer gets the full 1.6M database + local library
+        self.tag_completer.set_db_paths(alltags_db, library_db)
+        # Search Index completer ONLY gets the local library (no point suggesting tags that aren't on files)
+        self.search_completer.set_db_paths("", library_db)
 
-        if os.path.exists(characters_db):
-            try:
-                conn = sqlite3.connect(characters_db)
-                conn.execute("PRAGMA journal_mode=WAL;")
-                cursor = conn.cursor()
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-                tables = [t[0] for t in cursor.fetchall()]
+        # Retire any previous worker without blocking the main thread
+        if hasattr(self, '_tag_loader') and self._tag_loader:
+            self._retire_worker(self._tag_loader)
 
-                if tables:
-                    target_table = "characters" if "characters" in tables else tables[0]
+        self._tag_loader = GlobalTagLoaderWorker(library_db, characters_db, alltags_db)
+        self._tag_loader.finished.connect(self._on_tags_loaded)
+        self._tag_loader.start()
 
-                    cursor.execute(f"PRAGMA table_info({target_table})")
-                    columns = [col[1] for col in cursor.fetchall()]
-
-                    if columns:
-                        col_name = "character_name" if "character_name" in columns else columns[0]
-                        col_alias = "raw_string" if "raw_string" in columns else (columns[1] if len(columns) > 1 else None)
-
-                        if col_alias:
-                            cursor.execute(f"SELECT {col_name}, {col_alias} FROM {target_table}")
-                            rows = cursor.fetchall()
-                            for c_name, r_str in rows:
-                                if c_name:
-                                    clean_c_name = normalize_tag(c_name)
-                                    char_tags.append(clean_c_name)
-                                    self.known_gelbooru_chars.add(clean_c_name)
-                                if r_str:
-                                    alias_part = str(r_str)
-                                    if '=' in alias_part: alias_part = alias_part.split('=', 1)[1]
-                                    for alias in alias_part.split(','):
-                                        clean_alias = normalize_tag(alias)
-                                        if clean_alias and clean_alias not in self.known_gelbooru_chars:
-                                            char_tags.append(clean_alias)
-                                            self.known_gelbooru_chars.add(clean_alias)
-                        else:
-                            cursor.execute(f"SELECT {col_name} FROM {target_table}")
-                            rows = cursor.fetchall()
-                            for c_name in rows:
-                                if c_name[0]:
-                                    clean_c_name = normalize_tag(c_name[0])
-                                    char_tags.append(clean_c_name)
-                                    self.known_gelbooru_chars.add(clean_c_name)
-
-                conn.close()
-            except Exception as e:
-                self.log(f"WARN: Could not read character database: {e}")
-
-        combined_set = set(all_tags + char_tags)
-        combined_list = sorted(list(combined_set))
+    def _on_tags_loaded(self, combined_list, known_chars):
+        """Called on the main thread when the background loader finishes."""
         self.tag_completer_model.setStringList(combined_list)
+        self.known_gelbooru_chars = known_chars
+
+        # Give the live-lookup completers their DB paths so they can start working
+        settings = QSettings("MediaNest", "AppConfig")
+        db_folder = settings.value("db_folder_path", "", type=str)
+        alltags_db = os.path.join(db_folder, "AllTags.db")
+        library_db, _ = self.get_db_paths()
+        
+        self.tag_completer.set_db_paths(alltags_db, library_db)
+        self.search_completer.set_db_paths("", library_db)
 
     def refresh_tagless_inbox(self):
         self.inbox_list_widget.clear()
@@ -1010,71 +1539,89 @@ class TagManagerTab(QWidget):
         self.vid_thumb_worker.clear_queue()
 
         library_db, _ = self.get_db_paths()
-        if not os.path.exists(library_db): return
+        if not os.path.exists(library_db):
+            return
 
-        try:
-            conn = self.settings_dialog.shared_conn
-            cursor = conn.cursor()
+        # Retire any previous loader without blocking the main thread
+        if hasattr(self, '_inbox_loader') and self._inbox_loader:
+            self._retire_worker(self._inbox_loader)
 
-            cursor.execute("""
-                DELETE FROM tagless
-                WHERE rowid NOT IN (
-                    SELECT MIN(rowid)
-                    FROM tagless
-                    GROUP BY hash
-                )
-            """)
-            conn.commit()
+        self._inbox_loader = TaglessInboxLoaderWorker(library_db)
+        self._inbox_loader.finished.connect(self._on_inbox_loaded)
+        self._inbox_loader.start()
 
-            cursor.execute("SELECT file_name, file_path, hash FROM tagless ORDER BY file_name ASC")
-            rows = cursor.fetchall()
-
-            invalid_hashes = []
-            valid_items_count = 0
-
-            files_for_img_thumbs = []
-            files_for_vid_thumbs = []
-
-            for file_name, file_path, file_hash in rows:
-
-                if not file_path or not os.path.exists(file_path):
-                    invalid_hashes.append(file_hash)
-                    continue
-
-                valid_items_count += 1
-
-                empty_pixmap = QPixmap(150, 150)
-                empty_pixmap.fill(Qt.GlobalColor.transparent)
-
-                item = QListWidgetItem()
-                item.setToolTip(file_name)
-                item.setIcon(QIcon(empty_pixmap))
-
-                if file_hash in self.pending_tag_changes:
-                    item.setBackground(QColor(45, 125, 70, 100))
-
-                item.setData(Qt.ItemDataRole.UserRole, {"path": file_path, "hash": file_hash})
-                self.thumbnail_map[file_path] = item
-                self.inbox_list_widget.addItem(item)
-
-                if any(file_name.lower().endswith(e) for e in ('.mp4', '.mkv', '.avi', '.webm', '.mov')):
-                    files_for_vid_thumbs.append(file_path)
-                else:
-                    files_for_img_thumbs.append(file_path)
-
-            if files_for_img_thumbs: self.thumb_worker.add_to_queue(files_for_img_thumbs)
-            if files_for_vid_thumbs: self.vid_thumb_worker.add_to_queue(files_for_vid_thumbs)
-
-            if invalid_hashes:
+    def _on_inbox_loaded(self, valid_rows, invalid_hashes):
+        """Called on the main thread; batch-adds inbox items to avoid a single-frame freeze."""
+        # Clean up invalid hashes in library using shared conn
+        if invalid_hashes:
+            try:
+                conn = self.settings_dialog.shared_conn
+                cursor = conn.cursor()
                 for h in invalid_hashes:
                     cursor.execute("DELETE FROM tagless WHERE hash = ?", (h,))
                 conn.commit()
-                self.log(f"[DB: library.db] Inbox Cleanup: Removed {len(invalid_hashes)} missing files from database.")
+                self.log(f"[DB: library.db] Inbox Cleanup: Removed {len(invalid_hashes)} missing files.")
+            except Exception as e:
+                self.log(f"TAGLESS CLEANUP ERR: {e}")
 
-            self.log(f"[DB: library.db] Tagless Queue synchronized. ({valid_items_count} items)")
+        # Stop any previous batch timer BEFORE creating a new one
+        if hasattr(self, '_inbox_batch_timer') and self._inbox_batch_timer is not None:
+            self._inbox_batch_timer.stop()
+            self._inbox_batch_timer.deleteLater()
+            self._inbox_batch_timer = None
 
-        except Exception as e:
-            self.log(f"TAGLESS SYNC ERR: {e}")
+        if not valid_rows:
+            self.log(f"[DB: library.db] Tagless Queue synchronized. (0 items)")
+            return
+
+        # Store rows so we can feed them in batches
+        self._inbox_pending_rows = list(valid_rows)
+        self._inbox_img_queue = []
+        self._inbox_vid_queue = []
+
+        # Use a timer to add items in batches of 50 so the UI stays responsive
+        self._inbox_batch_timer = QTimer(self)
+        self._inbox_batch_timer.setInterval(0)   # next event-loop tick
+        self._inbox_batch_timer.timeout.connect(self._add_inbox_batch)
+        self._inbox_batch_timer.start()
+
+        self.log(f"[DB: library.db] Loading {len(valid_rows)} tagless items...")
+
+
+    def _add_inbox_batch(self):
+        """Adds up to 50 inbox items per event-loop tick so the UI never freezes."""
+        BATCH = 50
+        batch = self._inbox_pending_rows[:BATCH]
+        self._inbox_pending_rows = self._inbox_pending_rows[BATCH:]
+
+        empty_pixmap = QPixmap(150, 150)
+        empty_pixmap.fill(Qt.GlobalColor.transparent)
+        empty_icon = QIcon(empty_pixmap)
+
+        for file_name, file_path, file_hash in batch:
+            item = QListWidgetItem()
+            item.setToolTip(file_name)
+            item.setIcon(empty_icon)
+            if file_hash in self.pending_tag_changes:
+                item.setBackground(QColor(45, 125, 70, 100))
+            item.setData(Qt.ItemDataRole.UserRole, {"path": file_path, "hash": file_hash})
+            self.thumbnail_map[file_path] = item
+            self.inbox_list_widget.addItem(item)
+
+            if any(file_name.lower().endswith(e) for e in ('.mp4', '.mkv', '.avi', '.webm', '.mov')):
+                self._inbox_vid_queue.append(file_path)
+            else:
+                self._inbox_img_queue.append(file_path)
+
+        if not self._inbox_pending_rows:
+            # All done — kick off thumbnails
+            self._inbox_batch_timer.stop()
+            if self._inbox_img_queue:
+                self.thumb_worker.add_to_queue(self._inbox_img_queue)
+            if self._inbox_vid_queue:
+                self.vid_thumb_worker.add_to_queue(self._inbox_vid_queue)
+            self.log(f"[DB: library.db] Tagless Queue synchronized. ({self.inbox_list_widget.count()} items)")
+
 
     def search_library_by_tag(self):
         """Searches the main library for a tag. If empty, loads the Tagless Inbox."""
@@ -1104,15 +1651,34 @@ class TagManagerTab(QWidget):
         conditions = []
         params = []
         for tag in tags_to_search:
-            conditions.append("""
-                hash IN (
-                    SELECT it.hash
-                    FROM ImageTags it
-                    JOIN Tags t ON it.tag_id = t.tag_id
-                    WHERE t.tag_name LIKE ?
-                )
-            """)
-            params.append(f"%{tag}%")
+            ns = None
+            if ':' in tag:
+                prefix, val = tag.split(':', 1)
+                prefix = prefix.strip().lower()
+                if prefix in ['character', 'artist', 'series', 'metadata', 'general']:
+                    ns = prefix
+                    tag = val.strip()
+
+            if ns:
+                conditions.append("""
+                    hash IN (
+                        SELECT it.hash
+                        FROM ImageTags it
+                        JOIN Tags t ON it.tag_id = t.tag_id
+                        WHERE t.tag_name LIKE ? AND t.tag_type = ?
+                    )
+                """)
+                params.extend([f"%{tag}%", ns])
+            else:
+                conditions.append("""
+                    hash IN (
+                        SELECT it.hash
+                        FROM ImageTags it
+                        JOIN Tags t ON it.tag_id = t.tag_id
+                        WHERE t.tag_name LIKE ?
+                    )
+                """)
+                params.append(f"%{tag}%")
 
         query += " AND ".join(conditions)
         cursor.execute(query, tuple(params))
@@ -1165,12 +1731,18 @@ class TagManagerTab(QWidget):
         self.rename_input.blockSignals(False)
 
         if file_hash in self.pending_tag_changes:
-            for tag_name in self.pending_tag_changes[file_hash]:
-                item = QListWidgetItem(tag_name)
+            for tag_data in self.pending_tag_changes[file_hash]:
+                if isinstance(tag_data, tuple):
+                    ns, tag_name = tag_data
+                else:
+                    ns, tag_name = 'general', tag_data
+                display_text = f"[{ns.upper()[:4]}]  {tag_name}"
+                item = QListWidgetItem(display_text)
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 item.setCheckState(Qt.CheckState.Unchecked)
-                item.setForeground(QColor("#ff6b6b"))
-                item.setData(Qt.ItemDataRole.UserRole, {"tag_id": None, "tag_name": tag_name, "is_saved": False})
+                item.setForeground(NS_COLORS.get(ns, QColor('#cccccc')))
+                item.setBackground(NS_BG.get(ns, QColor(40, 40, 40, 180)))
+                item.setData(Qt.ItemDataRole.UserRole, {"tag_id": None, "tag_name": tag_name, "is_saved": False, "ns": ns})
                 self.file_tag_list.addItem(item)
 
             self.btn_save_archive.setEnabled(True)
@@ -1186,28 +1758,35 @@ class TagManagerTab(QWidget):
                 cursor.execute("SELECT 1 FROM tagless WHERE hash = ?", (file_hash,))
                 is_in_tagless = cursor.fetchone() is not None
                 cursor.execute("""
-                    SELECT t.tag_id, t.tag_name
+                    SELECT t.tag_id, t.tag_name, t.tag_type
                     FROM Tags t
                     JOIN ImageTags it ON t.tag_id = it.tag_id
                     WHERE it.hash = ?
                 """, (file_hash,))
 
                 for row in cursor.fetchall():
-                    tag_id, tag_name = row
-                    item = QListWidgetItem(tag_name)
+                    tag_id, tag_name, tag_type = row
+                    ns = tag_type if tag_type else 'general'
+                    display_text = f"[{ns.upper()[:4]}]  {tag_name}"
+                    item = QListWidgetItem(display_text)
                     item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                     item.setCheckState(Qt.CheckState.Unchecked)
-                    item.setForeground(QColor("#ff6b6b"))
-                    item.setData(Qt.ItemDataRole.UserRole, {"tag_id": tag_id, "tag_name": tag_name, "is_saved": True})
+                    item.setForeground(NS_COLORS.get(ns, QColor('#cccccc')))
+                    item.setBackground(NS_BG.get(ns, QColor(40, 40, 40, 180)))
+                    item.setData(Qt.ItemDataRole.UserRole, {"tag_id": tag_id, "tag_name": tag_name, "is_saved": True, "ns": ns})
                     self.file_tag_list.addItem(item)
 
             if file_hash in self.pending_cloud_matches:
                 for tag in self.pending_cloud_matches[file_hash]:
-                    item = QListWidgetItem(f"{tag}")
+                    ns = 'general'
+                    display_text = f"[{ns.upper()[:4]}]  {tag}"
+                    item = QListWidgetItem(display_text)
                     item.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "cloud.svg"))))
                     item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                     item.setCheckState(Qt.CheckState.Unchecked)
-                    item.setForeground(QColor("#b388ff"))
+                    item.setForeground(NS_COLORS.get(ns, QColor('#b388ff')))
+                    item.setBackground(NS_BG.get(ns, QColor(40, 40, 40, 180)))
+                    item.setData(Qt.ItemDataRole.UserRole, {"tag_id": None, "tag_name": tag, "is_saved": False, "ns": ns})
                     self.file_tag_list.addItem(item)
 
             if not is_in_tagless:
@@ -1233,7 +1812,100 @@ class TagManagerTab(QWidget):
 
     def on_inbox_item_selected(self, item):
         data = item.data(Qt.ItemDataRole.UserRole)
-        if data: self.load_file_into_tagger(data["path"], data["hash"])
+        if not data: return
+        file_path = data["path"]
+        file_hash = data["hash"]
+        
+        if getattr(self, 'copy_tags_mode', None) == "SELECT_SOURCE":
+            source_tags = []
+            
+            if file_hash in self.pending_tag_changes:
+                for tag_data in self.pending_tag_changes[file_hash]:
+                    if isinstance(tag_data, tuple):
+                        ns, tag_name = tag_data
+                    else:
+                        ns, tag_name = 'general', tag_data
+                    source_tags.append((ns, tag_name))
+            else:
+                library_db, _ = self.get_db_paths()
+                if os.path.exists(library_db):
+                    conn = self.settings_dialog.shared_conn
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT t.tag_name, t.tag_type
+                        FROM Tags t
+                        JOIN ImageTags it ON t.tag_id = it.tag_id
+                        WHERE it.hash = ?
+                    """, (file_hash,))
+                    for row in cursor.fetchall():
+                        tag_name, tag_type = row
+                        ns = tag_type if tag_type else 'general'
+                        source_tags.append((ns, tag_name))
+            
+            filtered_tags = []
+            for ns, tag_name in source_tags:
+                search_ns = ns + ":" if ns != 'general' else 'general:'
+                # For empty namespace compatibility we also check ''
+                if search_ns in self.copy_tags_namespaces or (ns == 'general' and '' in self.copy_tags_namespaces):
+                    filtered_tags.append((ns, tag_name))
+            
+            if not filtered_tags:
+                self.log("Source item has no tags matching the selected categories. Please select another source.")
+                return
+                
+            self.copy_tags_source_tags = filtered_tags
+            self.copy_tags_mode = "APPLY_TAGS"
+            self.inbox_list_widget.setCursor(Qt.CursorShape.UpArrowCursor)
+            self.log(f"Stored {len(filtered_tags)} tags from {os.path.basename(file_path)}. Click any target item to paste them.")
+            return
+
+        elif getattr(self, 'copy_tags_mode', None) == "APPLY_TAGS":
+            if file_hash not in self.pending_tag_changes:
+                self.pending_tag_changes[file_hash] = []
+                library_db, _ = self.get_db_paths()
+                if os.path.exists(library_db):
+                    conn = self.settings_dialog.shared_conn
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT t.tag_name, t.tag_type
+                        FROM Tags t
+                        JOIN ImageTags it ON t.tag_id = it.tag_id
+                        WHERE it.hash = ?
+                    """, (file_hash,))
+                    for row in cursor.fetchall():
+                        t_name, t_type = row
+                        ns = t_type if t_type else 'general'
+                        
+                        tag_tuple = (ns, t_name) if ns != 'general' else t_name
+                        self.pending_tag_changes[file_hash].append(tag_tuple)
+
+            added_count = 0
+            for ns, tag_name in self.copy_tags_source_tags:
+                tag_tuple = (ns, tag_name) if ns != 'general' else tag_name
+                exists = False
+                for existing in self.pending_tag_changes[file_hash]:
+                    if isinstance(existing, tuple):
+                        e_ns, e_name = existing
+                    else:
+                        e_ns, e_name = 'general', existing
+                    if e_ns == ns and e_name == tag_name:
+                        exists = True
+                        break
+                
+                if not exists:
+                    self.pending_tag_changes[file_hash].append(tag_tuple)
+                    added_count += 1
+            
+            if added_count > 0:
+                self.log(f"Pasted {added_count} tags to {os.path.basename(file_path)}.")
+                item.setBackground(QColor(45, 125, 70, 100))
+            else:
+                self.log(f"All copied tags already exist in {os.path.basename(file_path)}.")
+                
+            self.load_file_into_tagger(file_path, file_hash)
+            return
+
+        self.load_file_into_tagger(file_path, file_hash)
 
     def mark_current_file_renamed(self, new_text):
         if not self.current_file_hash or not self.current_selected_file: return
@@ -1262,8 +1934,16 @@ class TagManagerTab(QWidget):
 
         current_tags = []
         for i in range(self.file_tag_list.count()):
-            tag_text = self.file_tag_list.item(i).text().replace("☁️ ", "").replace("☁️", "").strip()
-            if tag_text: current_tags.append(tag_text)
+            item = self.file_tag_list.item(i)
+            data = item.data(Qt.ItemDataRole.UserRole)
+            if data and isinstance(data, dict) and "tag_name" in data:
+                current_tags.append((data.get("ns", "general"), data["tag_name"]))
+            else:
+                # fallback for items added without data
+                tag_text = item.text().replace("☁️ ", "").replace("☁️", "").strip()
+                import re
+                tag_text = re.sub(r'^\[[A-Z]+\]\s+', '', tag_text)
+                if tag_text: current_tags.append(('general', tag_text))
 
         self.pending_tag_changes[self.current_file_hash] = current_tags
 
@@ -1274,19 +1954,37 @@ class TagManagerTab(QWidget):
         self.wake_up_save_button()
 
     def add_tag_to_current_list(self):
-        tag_value = self.input_add_tag.text().strip().lower().replace(" ", "_")
-        if not tag_value: return
+        raw_tag = self.input_add_tag.text().strip().lower().replace(" ", "_")
+        if not raw_tag: return
+        
+        ns = 'general'
+        tag_value = raw_tag
+        if ":" in raw_tag:
+            ns, tag_value = raw_tag.split(":", 1)
+            ns = ns.strip()
+            tag_value = tag_value.strip()
+
+        display_text = f"[{ns.upper()[:4]}]  {tag_value}"
 
         existing_items = []
         for i in range(self.file_tag_list.count()):
-            t = self.file_tag_list.item(i).text()
-            t = t.replace("☁️ ", "").replace("☁️", "").strip()
-            existing_items.append(t)
+            data = self.file_tag_list.item(i).data(Qt.ItemDataRole.UserRole)
+            if data and isinstance(data, dict) and "tag_name" in data:
+                existing_items.append(data["tag_name"])
+            else:
+                t = self.file_tag_list.item(i).text()
+                t = t.replace("☁️ ", "").replace("☁️", "").strip()
+                import re
+                t = re.sub(r'^\[[A-Z]+\]\s+', '', t)
+                existing_items.append(t)
 
         if tag_value not in existing_items:
-            item = QListWidgetItem(tag_value)
+            item = QListWidgetItem(display_text)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Unchecked)
+            item.setForeground(NS_COLORS.get(ns, QColor('#cccccc')))
+            item.setBackground(NS_BG.get(ns, QColor(40, 40, 40, 180)))
+            item.setData(Qt.ItemDataRole.UserRole, {"tag_id": None, "tag_name": tag_value, "is_saved": False, "ns": ns})
             self.file_tag_list.addItem(item)
             self.mark_current_file_changed()
 
@@ -1298,6 +1996,74 @@ class TagManagerTab(QWidget):
             item = self.file_tag_list.item(i)
             tag_name = item.text().lower()
             item.setHidden(search_text not in tag_name)
+
+    def show_tag_context_menu(self, pos):
+        item = self.file_tag_list.itemAt(pos)
+        if not item: return
+        
+        from PyQt6.QtWidgets import QMenu
+        menu = QMenu(self)
+        menu.setStyleSheet("QMenu { background-color: #252526; color: white; border: 1px solid #3e3e42; } QMenu::item:selected { background-color: #007acc; }")
+        
+        change_cat_menu = menu.addMenu("Change Category...")
+        
+        cats = [("Series", "series"), ("Character", "character"), ("Artist", "artist"), ("Metadata", "metadata"), ("General", "general")]
+        for display_name, ns in cats:
+            action = change_cat_menu.addAction(display_name)
+            action.triggered.connect(lambda checked, n=ns, i=item: self.change_tag_category(i, n))
+            
+        menu.exec(self.file_tag_list.mapToGlobal(pos))
+        
+    def change_tag_category(self, item, new_ns):
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if not data: return
+        
+        old_ns = data.get("ns")
+        tag_name = data.get("tag_name")
+        if old_ns == new_ns: return
+        
+        if not self.current_file_hash: return
+        
+        if self.current_file_hash not in self.pending_tag_changes:
+            self.pending_tag_changes[self.current_file_hash] = []
+            
+            library_db, _ = self.get_db_paths()
+            if os.path.exists(library_db):
+                conn = self.settings_dialog.shared_conn
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT t.tag_name, t.tag_type
+                    FROM Tags t
+                    JOIN ImageTags it ON t.tag_id = it.tag_id
+                    WHERE it.hash = ?
+                """, (self.current_file_hash,))
+                for row in cursor.fetchall():
+                    t_name, t_type = row
+                    t_ns = t_type if t_type else 'general'
+                    tag_tuple = (t_ns, t_name) if t_ns != 'general' else t_name
+                    self.pending_tag_changes[self.current_file_hash].append(tag_tuple)
+                    
+        new_list = []
+        for t in self.pending_tag_changes[self.current_file_hash]:
+            t_str = t[1] if isinstance(t, tuple) else t
+            if t_str.lower() != tag_name.lower():
+                new_list.append(t)
+        self.pending_tag_changes[self.current_file_hash] = new_list
+            
+        new_tuple = (new_ns, tag_name) if new_ns != 'general' else tag_name
+        self.pending_tag_changes[self.current_file_hash].append(new_tuple)
+        library_db, _ = self.get_db_paths()
+        if os.path.exists(library_db):
+            try:
+                conn = self.settings_dialog.shared_conn
+                cursor = conn.cursor()
+                cursor.execute("UPDATE Tags SET tag_type = ? WHERE tag_name = ?", (new_ns, tag_name))
+                conn.commit()
+            except Exception as e:
+                self.log(f"Error updating global database: {e}")
+            
+        self.load_file_into_tagger(self.current_selected_file, self.current_file_hash)
+        self.log(f"Changed tag '{tag_name}' category to {new_ns.upper()} (Updated globally in Database).")
 
     def delete_checked_tags(self):
         """Finds all checked tags and deletes them from the UI and Database."""
@@ -1343,31 +2109,42 @@ class TagManagerTab(QWidget):
 
             if result:
                 new_tags = []
-                if result.get("best_char"): new_tags.append(result["best_char"].lower().replace(" ", "_"))
+                if result.get("best_char"): new_tags.append(('character', result["best_char"].lower().replace(" ", "_")))
 
                 for tag_name, score in result.get("top_tags", []):
                     if score >= 0.12:
-                        new_tags.append(tag_name.lower().replace(" ", "_"))
+                        new_tags.append(('general', tag_name.lower().replace(" ", "_")))
 
                 new_tags = new_tags[:31]
 
                 existing_items = []
                 for i in range(self.file_tag_list.count()):
-                    t = self.file_tag_list.item(i).text()
-                    t = t.replace("☁️ ", "").replace("☁️", "").strip()
-                    existing_items.append(t)
+                    data = self.file_tag_list.item(i).data(Qt.ItemDataRole.UserRole)
+                    if data and isinstance(data, dict) and "tag_name" in data:
+                        existing_items.append(data["tag_name"])
+                    else:
+                        t = self.file_tag_list.item(i).text()
+                        t = t.replace("☁️ ", "").replace("☁️", "").strip()
+                        import re
+                        t = re.sub(r'^\[[A-Z]+\]\s+', '', t)
+                        existing_items.append(t)
 
                 added_new_tags = False
-                for t in new_tags:
+                for ns, t in new_tags:
                     if t not in existing_items:
-                        item = QListWidgetItem(t)
+                        display_text = f"[{ns.upper()[:4]}]  {t}"
+                        item = QListWidgetItem(display_text)
                         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                         item.setCheckState(Qt.CheckState.Unchecked)
+                        item.setForeground(NS_COLORS.get(ns, QColor('#cccccc')))
+                        item.setBackground(NS_BG.get(ns, QColor(40, 40, 40, 180)))
+                        item.setData(Qt.ItemDataRole.UserRole, {"tag_id": None, "tag_name": t, "is_saved": False, "ns": ns})
                         self.file_tag_list.addItem(item)
                         added_new_tags = True
 
                 if added_new_tags:
                     self.wake_up_save_button()
+                    self.mark_current_file_changed()
         except Exception as e:
             self.log(f"AI CRITICAL: Engine failure -> {e}")
         finally:
@@ -1428,7 +2205,8 @@ class TagManagerTab(QWidget):
                 row = cursor.fetchone()
                 if row:
                     file_path, file_name, phash_value = row
-                    cursor.execute("INSERT OR IGNORE INTO Images (hash, file_path, file_name, phash) VALUES (?, ?, ?, ?)", (file_hash, file_path, file_name, phash_value))
+                    file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+                    cursor.execute("INSERT OR IGNORE INTO Images (hash, file_path, file_name, phash, file_size) VALUES (?, ?, ?, ?, ?)", (file_hash, file_path, file_name, phash_value, file_size))
                     for tag in tags:
                         cursor.execute("INSERT OR IGNORE INTO Tags (tag_name) VALUES (?)", (tag,))
                         cursor.execute("SELECT tag_id FROM Tags WHERE tag_name = ?", (tag,))
@@ -1552,21 +2330,30 @@ class TagManagerTab(QWidget):
                 row = cursor.fetchone()
                 phash_value = row[0] if row else None
 
-                cursor.execute("INSERT OR IGNORE INTO Images (hash, file_path, file_name, phash) VALUES (?, ?, ?, ?)", (file_hash, file_path, file_name, phash_value))
+                file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+                cursor.execute("INSERT OR IGNORE INTO Images (hash, file_path, file_name, phash, file_size) VALUES (?, ?, ?, ?, ?)", (file_hash, file_path, file_name, phash_value, file_size))
 
                 cursor.execute("DELETE FROM ImageTags WHERE hash = ?", (file_hash,))
 
-                for tag in tags:
-                    if not tag: continue
-                    cursor.execute("INSERT OR IGNORE INTO Tags (tag_name) VALUES (?)", (tag,))
-                    cursor.execute("SELECT tag_id FROM Tags WHERE tag_name = ?", (tag,))
+                for tag_data in tags:
+                    if not tag_data: continue
+                    if isinstance(tag_data, tuple):
+                        ns, tag_name = tag_data
+                    else:
+                        ns, tag_name = 'general', tag_data
+
+                    if not tag_name: continue
+                    cursor.execute("INSERT OR IGNORE INTO Tags (tag_name, tag_type) VALUES (?, ?)", (tag_name, ns))
+                    cursor.execute("SELECT tag_id FROM Tags WHERE tag_name = ?", (tag_name,))
                     tag_id = cursor.fetchone()[0]
                     cursor.execute("INSERT OR IGNORE INTO ImageTags (hash, tag_id) VALUES (?, ?)", (file_hash, tag_id))
 
                 cursor.execute("DELETE FROM tagless WHERE hash = ?", (file_hash,))
 
                 if tags:
-                    upload_queue.append((file_hash, tags))
+                    # extract tag strings for cloud upload queue
+                    tag_strs = [t[1] if isinstance(t, tuple) else t for t in tags]
+                    upload_queue.append((file_hash, tag_strs))
 
                 if file_hash in self.pending_cloud_matches:
                     del self.pending_cloud_matches[file_hash]

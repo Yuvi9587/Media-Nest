@@ -1,6 +1,7 @@
 import os
 import sqlite3
 from PIL import Image
+Image.MAX_IMAGE_PIXELS = None
 import imagehash
 from PyQt6.QtCore import QThread, pyqtSignal
 from collections import defaultdict
