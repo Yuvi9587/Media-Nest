@@ -276,14 +276,14 @@ When a database is connected, the search bar becomes a powerful tag-based search
 
 ### Natural Language Smart Search
 
-If you want to search using plain English instead of manually separating tags, prefix your search with `Search: ` (e.g., `Search: makima on a beach in a white bikini`). 
+If you want to search using plain English instead of manually separating tags, prefix your search with `Search: ` (e.g., `Search: makima wearing a suit in an office`). 
 
 The smart search engine will parse your sentence, remove filler words, and automatically map the remaining terms to the closest matching tags in your database using an intelligent bigram-first algorithm. 
 
 **Smart Tag Classification:**
 - When parsing, it detects if a matched tag is a **character, series, or artist**. These are treated as **anchor tags** and become strictly required in the image.
 - Backgrounds, clothing, and objects (like "beach" or "bikini") are treated as **general tags**.
-- If a character anchor is present, all general tags are pooled together and the engine requires the image to match **at least one** of them. This allows the search to be extremely flexible (e.g., returning images with Makima and a beach, or Makima and a bikini).
+- If a character anchor is present, all general tags are pooled together and the engine requires the image to match **at least one** of them. This allows the search to be extremely flexible (e.g., returning images with Makima and a suit, or Makima and an office).
 - If no character anchor is present in your sentence, the algorithm adapts and strictly requires all general tags so you still get highly precise results.
 
 ---
