@@ -761,7 +761,8 @@ class DbRepairTab(QWidget):
             self._append_log(f"[ERROR] Could not create backup: {e} -- aborting deletion.", "#ef5350")
             return
 
-            conn   = sqlite3.connect(library_db)
+        try:
+            conn = sqlite3.connect(library_db)
             conn.execute("PRAGMA journal_mode=WAL;")
             cursor = conn.cursor()
             
@@ -787,6 +788,7 @@ class DbRepairTab(QWidget):
             conn.commit()
             conn.close()
             self._append_log(f"[DELETED] Removed {len(selected_hashes)} orphan record(s) from library.db", "#ef5350")
+            
             rows_to_remove = []
             for row in range(self.tbl_orphans.rowCount()):
                 item = self.tbl_orphans.item(row, 0)
@@ -794,6 +796,7 @@ class DbRepairTab(QWidget):
                     rows_to_remove.append(row)
             for row in reversed(rows_to_remove):
                 self.tbl_orphans.removeRow(row)
+                
             self._orphan_data = [(h, p, n) for h, p, n in self._orphan_data if h not in selected_hashes]
             if not self._orphan_data:
                 self.btn_delete_orphans.setEnabled(False)

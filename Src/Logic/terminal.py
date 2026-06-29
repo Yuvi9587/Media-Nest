@@ -1105,6 +1105,23 @@ class TerminalDialog(QDialog):
             "unused":      self._tag_unused,
         }.get(sub, lambda _: self.print_err(f"Unknown tag subcommand: '{sub}'. Try: help tag"))(rest)
 
+    def _tag_smartsearch(self, args):
+        if not args:
+            self.print_err("Usage: tag smartsearch <query>")
+            return
+        query = " ".join(args)
+        from Src.Logic.smart_search import parse_natural_language_query
+        cur = self.db.cursor()
+        try:
+            tags = parse_natural_language_query(query, cur)
+            if not tags:
+                self.print_warn("No tags found for the given query.")
+            else:
+                self.print_ok(f"Smart Search mapped '{query}' to:")
+                self.print_info(f"  {', '.join(tags)}")
+        except Exception as e:
+            self.print_err(f"Smart Search failed: {e}")
+
     def _tag_list(self, args):
         pos, flags = _parse_flags(args)
         limit = int(flags.get("limit", 50))

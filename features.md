@@ -16,6 +16,7 @@
 - [Video Player](#video-player)
 - [Manga & Manhwa Reader](#manga--manhwa-reader)
 - [Database & Tag Search](#database--tag-search)
+- [Terminal](#terminal)
 - [Keyboard Shortcuts](#keyboard-shortcuts)
 - [Right-Click Menu](#right-click-menu)
 - [Settings Dialog](#settings-dialog)
@@ -272,6 +273,37 @@ When a database is connected, the search bar becomes a powerful tag-based search
 - After a comma, the autocomplete continues for the next tag — just keep typing.
 - Results show in the gallery as thumbnails and are also organized in the file tree by folder.
 - Scroll to the bottom of the gallery to load more results automatically.
+
+### Natural Language Smart Search
+
+If you want to search using plain English instead of manually separating tags, prefix your search with `Search: ` (e.g., `Search: makima on a beach in a white bikini`). 
+
+The smart search engine will parse your sentence, remove filler words, and automatically map the remaining terms to the closest matching tags in your database using an intelligent bigram-first algorithm. 
+
+**Smart Tag Classification:**
+- When parsing, it detects if a matched tag is a **character, series, or artist**. These are treated as **anchor tags** and become strictly required in the image.
+- Backgrounds, clothing, and objects (like "beach" or "bikini") are treated as **general tags**.
+- If a character anchor is present, all general tags are pooled together and the engine requires the image to match **at least one** of them. This allows the search to be extremely flexible (e.g., returning images with Makima and a beach, or Makima and a bikini).
+- If no character anchor is present in your sentence, the algorithm adapts and strictly requires all general tags so you still get highly precise results.
+
+---
+
+## Terminal
+
+Media Nest includes a built-in terminal that can be opened by clicking the <img src="assets/uisvg/terminal.svg" width="16" height="16"> **Terminal** button in the sidebar. This provides a command-line interface for advanced database manipulation and batch processing without needing external DB tools.
+
+**Available Commands:**
+- `tag list`: Shows all unique tags in the database.
+- `tag add <tag> <hash1,hash2>`: Manually add a tag to specific file hashes.
+- `tag rm <tag> <hash1,hash2>`: Remove a tag from specific files.
+- `tag replace <old> <new>`: Globally replace one tag with another (merges them if the new one already exists).
+- `tag rename <old> <new>`: Rename a tag globally.
+- `tag smartsearch <query>`: Test the NLP tagging engine's parsing logic.
+- `file move --from <old_path> --to <new_path>`: Safely update file paths in the database if you moved them outside the app.
+- `file delete --orphans`: Purges database records for files that no longer exist on your disk.
+- `help` / `clear` / `exit`: Standard terminal commands.
+
+*Tip: Use the `Up` and `Down` arrow keys to cycle through your command history.*
 
 ---
 
@@ -541,7 +573,8 @@ The tab is divided into **three numbered columns**:
 
 | Control | What it does |
 |---|---|
-| **Import Folder** (blue button) | Scans a folder on your computer and adds all image files inside (sorted by filename naturally) directly to the page list. |
+| **Import Folder** (blue button) | Scans a folder on your computer and adds all image files inside (sorted by filename naturally) directly to the page list. If it detects subfolders (chapters), it imports them as a batch. |
+| **Group / Ungroup** button | When batch-importing subfolders, this button appears at the top. Toggles the search grid between showing grouped folders or flattening all images into one view. |
 | **Load Existing** (blue button) | Opens a picker window listing all your previously saved custom mangas along with their total page counts. Select one to load its pages, title, and tags so you can edit it. The create button changes to **Save Changes**. |
 | **Clear / New** (red button) | Resets everything — clears the title, tags, page list, and search results to start fresh. |
 | **Search by tag input** | Type a tag and press Enter to search your library. Results appear as image thumbnails. Has autocomplete. |
@@ -558,6 +591,7 @@ Shows the final ordered page list for your manga.
 | **Page list** | Displays all selected pages in order. Each item shows the filename and a **"Pg N"** page number label on the right edge. |
 | **Drag & drop** | Drag any page up or down in the list to reorder pages. A blue drop indicator shows where the item will land. |
 | **Move Up / Move Down** buttons | Move the currently selected page one position up or down. |
+| **Right-Click (Double Spread)** | Right-click any page in the list and select **Attach to Next Page (Double Spread)**. This links the page to the next one so they display side-by-side as a single wide spread in the Manga Reader. A chain-link icon 🔗 appears visually connecting the two rows. |
 | **Remove** button | Removes the selected page from the list (also deselects it in the search grid). |
 
 ---
