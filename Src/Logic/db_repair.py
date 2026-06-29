@@ -22,12 +22,6 @@ def _svg(name) -> str:
     base = getattr(sys, '_MEIPASS', os.path.abspath("."))
     return os.path.join(base, "assets", "uisvg", name)
 
-
-
-
-
-
-
 class DbRepairWorker(QThread):
     log_signal      = pyqtSignal(str, str)
     progress_signal = pyqtSignal(int, int)
@@ -91,6 +85,16 @@ class DbRepairWorker(QThread):
             for (p,) in cur.fetchall():
                 if p and not os.path.exists(p) and not path_tracked(p):
                     fake_h = "CUSTOM:" + hashlib.md5(p.encode('utf-8', errors='ignore')).hexdigest()
+                    broken.append((fake_h, p, os.path.basename(p)))
+        except sqlite3.OperationalError:
+            pass
+
+        # 4. MangaGalleries folders
+        try:
+            cur.execute("SELECT folder_path FROM MangaGalleries")
+            for (p,) in cur.fetchall():
+                if p and not os.path.exists(p) and not path_tracked(p):
+                    fake_h = "GALLERY:" + hashlib.md5(p.encode('utf-8', errors='ignore')).hexdigest()
                     broken.append((fake_h, p, os.path.basename(p)))
         except sqlite3.OperationalError:
             pass
@@ -189,6 +193,14 @@ class DbRepairWorker(QThread):
                 if filenames:
                     self.log_signal.emit(f"  -> {dirpath}  ({len(filenames)} files)", "#888888")
 
+                dir_name_lower = os.path.basename(dirpath).lower()
+                candidates = by_name.get(dir_name_lower, [])
+                for h, old_path in candidates:
+                    if h.startswith("GALLERY:") and h not in resolved:
+                        relocated.append((h, old_path, dirpath, "Filename (Gallery Folder)"))
+                        resolved.add(h)
+                        self.log_signal.emit(f"  [CONFIRMED] {os.path.basename(old_path)} -> {dirpath} (Gallery)", "#81c995")
+
                 for fname in filenames:
                     if self._abort: break
                     full_path = os.path.join(dirpath, fname)
@@ -207,15 +219,21 @@ class DbRepairWorker(QThread):
                                 self.log_signal.emit(
                                     f"  [FOUND] {os.path.basename(old_path)} -> {full_path}", "#81c995")
                             else:
-                                computed = self._hash_file(full_path)
-                                if computed and computed == h:
-                                    relocated.append((h, old_path, full_path, "Hash+Filename"))
+                                if h.startswith("CUSTOM:") or h.startswith("GALLERY:"):
+                                    relocated.append((h, old_path, full_path, "Filename (Custom/Gallery)"))
                                     resolved.add(h)
                                     self.log_signal.emit(
                                         f"  [CONFIRMED] {os.path.basename(old_path)} -> {full_path}", "#81c995")
-                                elif candidates:
-                                    self.log_signal.emit(
-                                        f"  [WEAK] {fname} found but hash differs -- skipping", "#ffa726")
+                                else:
+                                    computed = self._hash_file(full_path)
+                                    if computed and computed == h:
+                                        relocated.append((h, old_path, full_path, "Hash+Filename"))
+                                        resolved.add(h)
+                                        self.log_signal.emit(
+                                            f"  [CONFIRMED] {os.path.basename(old_path)} -> {full_path}", "#81c995")
+                                    elif candidates:
+                                        self.log_signal.emit(
+                                            f"  [WEAK] {fname} found but hash differs -- skipping", "#ffa726")
 
                     elif self.match_mode == "hash":
                         computed = self._hash_file(full_path)
@@ -682,6 +700,9 @@ class DbRepairTab(QWidget):
                             (new_path, old_path))
                         cursor.execute(
                             "UPDATE CustomMangas SET cover_image = ? WHERE cover_image = ?",
+                            (new_path, old_path))
+                        cursor.execute(
+                            "UPDATE MangaGalleries SET folder_path = ? WHERE folder_path = ?",
                             (new_path, old_path))
                     except sqlite3.OperationalError:
                         pass

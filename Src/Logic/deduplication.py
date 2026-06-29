@@ -47,10 +47,15 @@ class DeduplicationWorker(QThread):
                     JOIN Tags t ON it.tag_id = t.tag_id
                     WHERE t.tag_name LIKE ?
                 """, (f"%{self.target_tag}%",))
+                rows = cursor.fetchall()
             else:
                 cursor.execute("SELECT hash, file_path, phash FROM Images")
-                
-            rows = cursor.fetchall()
+                rows = cursor.fetchall()
+                try:
+                    cursor.execute("SELECT hash, file_path, phash FROM tagless")
+                    rows.extend(cursor.fetchall())
+                except sqlite3.OperationalError:
+                    pass
             
             valid_images = []
             images_updated = 0
@@ -73,6 +78,10 @@ class DeduplicationWorker(QThread):
                         img = Image.open(file_path)
                         current_phash = str(imagehash.phash(img, hash_size=16))
                         cursor.execute("UPDATE Images SET phash = ? WHERE hash = ?", (current_phash, md5_hash))
+                        try:
+                            cursor.execute("UPDATE tagless SET phash = ? WHERE hash = ?", (current_phash, md5_hash))
+                        except sqlite3.OperationalError:
+                            pass
                         
                         images_updated += 1
                         if images_updated % 100 == 0:

@@ -307,6 +307,7 @@ class DbLookupCompleter(QCompleter):
         self._result_model = NsColorModel()
         super().__init__(self._result_model, parent)
         self.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         self.setFilterMode(Qt.MatchFlag.MatchContains)  # safe: model only has 25 items
         self.setMaxVisibleItems(12)
 
@@ -314,7 +315,7 @@ class DbLookupCompleter(QCompleter):
         self._library_db = None
         self._debounce = QTimer()
         self._debounce.setSingleShot(True)
-        self._debounce.setInterval(180)   # ms after last keystroke
+        self._debounce.setInterval(450)   # ms after last keystroke
         self._debounce.timeout.connect(self._do_lookup)
         self._last_term = ""
 
@@ -482,8 +483,8 @@ class PersistentCloudWorker(QThread):
 
     def run(self):
 
-        url = "https://jhzshjwkeljwuovfyasa.supabase.co/rest/v1/unapproved_queue"
-        key = "sb_publishable_U38Za9kpw-oLzHFRMC5wyA_VuI6OElh"
+        url = "https://sbhnjnojxqahzkymbddw.supabase.co/rest/v1/unapproved_queue"
+        key = "sb_publishable_N21jEpddyr7iRUo_OmQbzQ_aJysn802"
 
         settings = QSettings("MediaNest", "CloudConfig")
         user_token = settings.value("anon_user_token", "", type=str)
@@ -538,8 +539,8 @@ class CloudSyncThread(QThread):
 
     def run(self):
         self.log_msg.emit(f"CLOUD SYNC: Contacting Supabase to check {len(self.hashes)} files...")
-        url = "https://jhzshjwkeljwuovfyasa.supabase.co/rest/v1/global_tags_archive"
-        key = "sb_publishable_U38Za9kpw-oLzHFRMC5wyA_VuI6OElh"
+        url = "https://sbhnjnojxqahzkymbddw.supabase.co/rest/v1/global_tags_archive"
+        key = "sb_publishable_N21jEpddyr7iRUo_OmQbzQ_aJysn802"
         headers = {"apikey": key, "Authorization": f"Bearer {key}"}
 
         results = {}
@@ -1050,6 +1051,53 @@ class CopyTagsDialog(QDialog):
             ns.append('')
         return ns
 
+class TagCountDelegate(QStyledItemDelegate):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def paint(self, painter, option, index):
+        super().paint(painter, option, index)
+
+        data = index.data(Qt.ItemDataRole.UserRole)
+        if not data: return
+        file_hash = data.get("hash")
+        if not file_hash: return
+
+        count = 0
+        tag_manager = None
+        
+        p = self.parent()
+        while p:
+            if hasattr(p, 'pending_tag_changes'):
+                tag_manager = p
+                break
+            p = p.parent()
+            
+        if tag_manager and file_hash in tag_manager.pending_tag_changes:
+            count = len(tag_manager.pending_tag_changes[file_hash])
+        else:
+            count = data.get("tag_count", 0)
+
+        if count <= 0: return
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        rect = option.rect
+        badge_size = 22
+        x = rect.right() - badge_size - 4
+        y = rect.top() + 4
+
+        painter.setBrush(QColor(0, 122, 204, 220))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(x, y, badge_size, badge_size)
+
+        painter.setPen(QColor("white"))
+        font = painter.font()
+        font.setBold(True)
+        font.setPointSize(9)
+        painter.setFont(font)
+        painter.drawText(x, y, badge_size, badge_size, Qt.AlignmentFlag.AlignCenter, str(count))
+        painter.restore()
 
 class TagManagerTab(QWidget):
     log_signal = pyqtSignal(str)
@@ -1179,7 +1227,9 @@ class TagManagerTab(QWidget):
                 return
                 
             self.copy_tags_mode = "SELECT_SOURCE"
-            self.inbox_list_widget.setCursor(Qt.CursorShape.CrossCursor)
+            from PyQt6.QtGui import QCursor, QPixmap
+            cursor_pixmap = QPixmap(resource_path(os.path.join("assets", "uisvg", "cursor_source.svg")))
+            self.inbox_list_widget.setCursor(QCursor(cursor_pixmap, 2, 2))
             if hasattr(self, 'btn_copy_tags'):
                 self.btn_copy_tags.setText("Cancel (Esc)")
                 self.btn_copy_tags.setStyleSheet("QPushButton { background-color: #d32f2f; color: white; border-radius: 4px; padding: 5px; font-weight: bold; } QPushButton:hover { background-color: #f44336; }")
@@ -1214,7 +1264,15 @@ class TagManagerTab(QWidget):
         self.search_bar.setStyleSheet("padding: 8px; border-radius: 4px; background-color: #252526; color: white; border: 1px solid #3e3e42;")
         self.search_timer = QTimer(self)
         self.search_timer.setSingleShot(True)
-        self.search_timer.setInterval(350)
+        from PyQt6.QtCore import QSettings
+        hw_profile = QSettings("MediaNest", "AppConfig").value("hw_profile", "Balanced", type=str)
+        if hw_profile == "Low-End":
+            self.search_timer.setInterval(1500)
+        elif hw_profile == "Balanced":
+            self.search_timer.setInterval(800)
+        else:
+            self.search_timer.setInterval(350)
+            
         self.search_timer.timeout.connect(self.search_library_by_tag)
 
         self.search_bar.textChanged.connect(self.search_timer.start)
@@ -1253,6 +1311,7 @@ class TagManagerTab(QWidget):
         self.inbox_list_widget.setSpacing(10)
         self.inbox_list_widget.setMovement(QListWidget.Movement.Static)
         self.inbox_list_widget.setWordWrap(True)
+        self.inbox_list_widget.setItemDelegate(TagCountDelegate(self.inbox_list_widget))
         self.inbox_list_widget.itemClicked.connect(self.on_inbox_item_selected)
         inbox_layout.addWidget(self.inbox_list_widget)
 
@@ -1469,7 +1528,7 @@ class TagManagerTab(QWidget):
         item.setToolTip(file_name)
         item.setIcon(QIcon(empty_pixmap))
 
-        item.setData(Qt.ItemDataRole.UserRole, {"path": file_path, "hash": file_hash})
+        item.setData(Qt.ItemDataRole.UserRole, {"path": file_path, "hash": file_hash, "tag_count": 0})
         self.thumbnail_map[file_path] = item
         self.inbox_list_widget.addItem(item)
 
@@ -1501,9 +1560,9 @@ class TagManagerTab(QWidget):
     def refresh_global_tags(self):
         library_db, characters_db = self.get_db_paths()
 
-        settings = QSettings("MediaNest", "AppConfig")
-        db_folder = settings.value("db_folder_path", "", type=str)
-        alltags_db = os.path.join(db_folder, "AllTags.db")
+        appdata_dir = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "appdata")
+        os.makedirs(appdata_dir, exist_ok=True)
+        alltags_db = os.path.join(appdata_dir, "AllTags.db")
 
         # Add Tag completer gets the full 1.6M database + local library
         self.tag_completer.set_db_paths(alltags_db, library_db)
@@ -1524,9 +1583,8 @@ class TagManagerTab(QWidget):
         self.known_gelbooru_chars = known_chars
 
         # Give the live-lookup completers their DB paths so they can start working
-        settings = QSettings("MediaNest", "AppConfig")
-        db_folder = settings.value("db_folder_path", "", type=str)
-        alltags_db = os.path.join(db_folder, "AllTags.db")
+        appdata_dir = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "appdata")
+        alltags_db = os.path.join(appdata_dir, "AllTags.db")
         library_db, _ = self.get_db_paths()
         
         self.tag_completer.set_db_paths(alltags_db, library_db)
@@ -1604,7 +1662,7 @@ class TagManagerTab(QWidget):
             item.setIcon(empty_icon)
             if file_hash in self.pending_tag_changes:
                 item.setBackground(QColor(45, 125, 70, 100))
-            item.setData(Qt.ItemDataRole.UserRole, {"path": file_path, "hash": file_hash})
+            item.setData(Qt.ItemDataRole.UserRole, {"path": file_path, "hash": file_hash, "tag_count": 0})
             self.thumbnail_map[file_path] = item
             self.inbox_list_widget.addItem(item)
 
@@ -1647,7 +1705,11 @@ class TagManagerTab(QWidget):
 
         self.inbox_group.setTitle(f"Tag Management Index (Results for: {search_text})")
 
-        query = "SELECT hash, file_path, file_name FROM Images WHERE "
+        query = """
+            SELECT i.hash, i.file_path, i.file_name, 
+                   (SELECT COUNT(*) FROM ImageTags it WHERE it.hash = i.hash) as tag_count
+            FROM Images i WHERE 
+        """
         conditions = []
         params = []
         for tag in tags_to_search:
@@ -1660,34 +1722,42 @@ class TagManagerTab(QWidget):
                     tag = val.strip()
 
             if ns:
+                if not tag:
+                    continue  # Prevent massive queries when user just autocompleted the namespace prefix
                 conditions.append("""
                     hash IN (
                         SELECT it.hash
                         FROM ImageTags it
                         JOIN Tags t ON it.tag_id = t.tag_id
-                        WHERE t.tag_name LIKE ? AND t.tag_type = ?
+                        WHERE t.tag_name = ? AND t.tag_type = ?
                     )
                 """)
-                params.extend([f"%{tag}%", ns])
+                params.extend([tag, ns])
             else:
                 conditions.append("""
                     hash IN (
                         SELECT it.hash
                         FROM ImageTags it
                         JOIN Tags t ON it.tag_id = t.tag_id
-                        WHERE t.tag_name LIKE ?
+                        WHERE t.tag_name = ?
                     )
                 """)
-                params.append(f"%{tag}%")
+                params.append(tag)
+
+        if not conditions:
+            self.inbox_list_widget.clear()
+            self.inbox_group.setTitle(f"Tag Management Index (Waiting for input...)")
+            return
 
         query += " AND ".join(conditions)
+        query += " ORDER BY tag_count ASC"
         cursor.execute(query, tuple(params))
 
         files_for_img_thumbs = []
         files_for_vid_thumbs = []
 
         for row in cursor.fetchall():
-            file_hash, file_path, file_name = row
+            file_hash, file_path, file_name, tag_count = row
 
             empty_pixmap = QPixmap(150, 150)
             empty_pixmap.fill(Qt.GlobalColor.transparent)
@@ -1699,7 +1769,7 @@ class TagManagerTab(QWidget):
             if file_hash in self.pending_tag_changes:
                 item.setBackground(QColor(45, 125, 70, 100))
 
-            item.setData(Qt.ItemDataRole.UserRole, {"path": file_path, "hash": file_hash})
+            item.setData(Qt.ItemDataRole.UserRole, {"path": file_path, "hash": file_hash, "tag_count": tag_count})
             self.thumbnail_map[file_path] = item
             self.inbox_list_widget.addItem(item)
 
@@ -1855,7 +1925,9 @@ class TagManagerTab(QWidget):
                 
             self.copy_tags_source_tags = filtered_tags
             self.copy_tags_mode = "APPLY_TAGS"
-            self.inbox_list_widget.setCursor(Qt.CursorShape.UpArrowCursor)
+            from PyQt6.QtGui import QCursor, QPixmap
+            cursor_pixmap = QPixmap(resource_path(os.path.join("assets", "uisvg", "cursor_apply.svg")))
+            self.inbox_list_widget.setCursor(QCursor(cursor_pixmap, 2, 2))
             self.log(f"Stored {len(filtered_tags)} tags from {os.path.basename(file_path)}. Click any target item to paste them.")
             return
 
@@ -2003,7 +2075,9 @@ class TagManagerTab(QWidget):
         
         from PyQt6.QtWidgets import QMenu
         menu = QMenu(self)
-        menu.setStyleSheet("QMenu { background-color: #252526; color: white; border: 1px solid #3e3e42; } QMenu::item:selected { background-color: #007acc; }")
+        menu.setStyleSheet("QMenu { background-color: #252526; color: white; border: 1px solid #3e3e42; } "
+                           "QMenu::item { padding: 6px 24px 6px 24px; background: transparent; } "
+                           "QMenu::item:selected { background-color: #007acc; }")
         
         change_cat_menu = menu.addMenu("Change Category...")
         
@@ -2350,7 +2424,7 @@ class TagManagerTab(QWidget):
 
                 cursor.execute("DELETE FROM tagless WHERE hash = ?", (file_hash,))
 
-                if tags:
+                if tags and file_hash not in self.pending_cloud_matches:
                     # extract tag strings for cloud upload queue
                     tag_strs = [t[1] if isinstance(t, tuple) else t for t in tags]
                     upload_queue.append((file_hash, tag_strs))

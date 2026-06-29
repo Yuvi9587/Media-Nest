@@ -1,27 +1,178 @@
 import os
+import sys
 import sqlite3
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGridLayout,
                              QLineEdit, QPushButton, QListWidget, QListWidgetItem,
                              QScrollArea, QFrame, QFileDialog, QMessageBox, QSplitter, QProgressBar,
                              QStyledItemDelegate)
-from PyQt6.QtCore import Qt, QSize, QTimer
+from PyQt6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QRect
 from PyQt6.QtGui import QIcon, QPixmap, QImageReader, QPainter, QColor
 import re
+from Src.Logic.paths import resource_path
 
 def natural_key(text):
     return [int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", text)]
 
 class PageNumberDelegate(QStyledItemDelegate):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        link_path = resource_path(os.path.join("assets", "uisvg", "link.svg"))
+        self.link_icon = QIcon(link_path)
+
     def paint(self, painter, option, index):
         super().paint(painter, option, index)
         page_num = index.row() + 1
         page_text = f"Pg {page_num}"
         painter.save()
-        painter.setPen(QColor("#888888"))
         rect = option.rect
-        rect.adjust(0, 0, -10, 0)
-        painter.drawText(rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, page_text)
+        painter.setPen(QColor("#888888"))
+        painter.drawText(option.rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, page_text)
+        
+        is_attached = index.data(Qt.ItemDataRole.UserRole + 2)
+        is_attached_to_prev = False
+        if index.row() > 0:
+            prev_index = index.model().index(index.row() - 1, 0)
+            is_attached_to_prev = index.model().data(prev_index, Qt.ItemDataRole.UserRole + 2)
+            
+        icon_size = 20
+        pixmap = self.link_icon.pixmap(icon_size, icon_size)
+        icon_w, icon_h = pixmap.width(), pixmap.height()
+        
+        x = rect.right() - 50
+        
+        if is_attached:
+            y = rect.bottom() - icon_h // 2 + 1
+            painter.drawPixmap(x, y, pixmap, 0, 0, icon_w, icon_h // 2)
+            
+        if is_attached_to_prev:
+            y = rect.top()
+            painter.drawPixmap(x, y, pixmap, 0, icon_h // 2, icon_w, icon_h - icon_h // 2)
+            
         painter.restore()
+
+class SearchItemDelegate(QStyledItemDelegate):
+    def __init__(self, pagination_tab, parent=None):
+        super().__init__(parent)
+        self.pagination_tab = pagination_tab
+
+    def paint(self, painter, option, index):
+        super().paint(painter, option, index)
+        
+        path = index.data(Qt.ItemDataRole.UserRole)
+        if path in self.pagination_tab.selected_images:
+            page_num = self.pagination_tab.selected_images.index(path) + 1
+            
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            
+            radius = 12
+            margin = 8
+            rect = option.rect
+            center_x = rect.right() - radius - margin
+            center_y = rect.top() + radius + margin
+            
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#00a2ff"))
+            painter.drawEllipse(center_x - radius, center_y - radius, radius * 2, radius * 2)
+            
+            painter.setPen(QColor("white"))
+            font = painter.font()
+            font.setBold(True)
+            font.setPointSize(10)
+            painter.setFont(font)
+            text_rect = QRect(center_x - radius, center_y - radius, radius * 2, radius * 2)
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, str(page_num))
+            
+            painter.restore()
+class Snackbar(QLabel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet("""
+            QLabel {
+                background-color: #0e639c;
+                color: white;
+                padding: 10px;
+                border-radius: 5px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+        """)
+        self.hide()
+        self.animation = QPropertyAnimation(self, b"geometry")
+        self.animation.setDuration(300)
+        
+        self.timer = QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(self.hide_snackbar)
+        
+    def show_message(self, message, duration=6000):
+        self.setText(message)
+        self.adjustSize()
+        
+        parent_rect = self.parentWidget().rect()
+        start_rect = QRect(
+            (parent_rect.width() - self.width()) // 2,
+            parent_rect.height(),
+            self.width(),
+            self.height()
+        )
+        end_rect = QRect(
+            (parent_rect.width() - self.width()) // 2,
+            parent_rect.height() - self.height() - 20,
+            self.width(),
+            self.height()
+        )
+        
+        self.setGeometry(start_rect)
+        self.show()
+        self.raise_()
+        
+        self.animation.setStartValue(start_rect)
+        self.animation.setEndValue(end_rect)
+        self.animation.start()
+        
+        self.timer.start(duration)
+        
+    def hide_snackbar(self):
+        end_rect = QRect(
+            self.geometry().x(),
+            self.parentWidget().rect().height(),
+            self.width(),
+            self.height()
+        )
+        self.animation.setStartValue(self.geometry())
+        self.animation.setEndValue(end_rect)
+        self.animation.start()
+        self.animation.finished.connect(self.hide)
+
+
+class FolderItemWidget(QWidget):
+    def __init__(self, title, image_paths, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(5, 5, 5, 5)
+        
+        lbl_title = QLabel(title)
+        lbl_title.setStyleSheet("font-weight: bold; font-size: 14px; color: white;")
+        lbl_title.setWordWrap(True)
+        layout.addWidget(lbl_title)
+        
+        grid = QGridLayout()
+        grid.setSpacing(5)
+        self.image_labels = {}
+        
+        MAX_PREVIEW = 10
+        col_count = 5
+        
+        for idx, path in enumerate(image_paths[:MAX_PREVIEW]):
+            lbl = QLabel()
+            lbl.setFixedSize(60, 80)
+            lbl.setStyleSheet("background-color: #2a2a2a; border-radius: 4px;")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            grid.addWidget(lbl, idx // col_count, idx % col_count)
+            self.image_labels[path] = lbl
+            
+        layout.addLayout(grid)
 
 
 class PaginationTab(QWidget):
@@ -33,6 +184,8 @@ class PaginationTab(QWidget):
             self.db_path = os.path.join(self.db_path, "library.db")
             
         self.selected_images = []
+        self.is_grouped = True
+        self.last_imported_leaf_folders = []
         
         self.preview_timer = QTimer(self)
         self.preview_timer.setSingleShot(True)
@@ -52,9 +205,9 @@ class PaginationTab(QWidget):
 
             # Resolve db paths so the completer can query AllTags.db and library.db
             library_db = self.db_path or ""
-            alltags_db = ""
-            if library_db:
-                alltags_db = os.path.join(os.path.dirname(library_db), "AllTags.db")
+            appdata_dir = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "appdata")
+            os.makedirs(appdata_dir, exist_ok=True)
+            alltags_db = os.path.join(appdata_dir, "AllTags.db")
 
             # Search input completer (colored by category)
             self.tag_completer = DbLookupCompleter(self)
@@ -113,6 +266,18 @@ class PaginationTab(QWidget):
         self.btn_clear.clicked.connect(self.clear_manga_state)
         top_bar.addWidget(self.btn_clear)
         
+        from PyQt6.QtGui import QIcon
+        import sys
+        base = getattr(sys, '_MEIPASS', os.path.abspath("."))
+        self.btn_group_toggle = QPushButton()
+        self.btn_group_toggle.setIcon(QIcon(os.path.join(base, "assets", "uisvg", "ungroup.svg")))
+        self.btn_group_toggle.setToolTip("Ungroup Folders")
+        self.btn_group_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_group_toggle.setStyleSheet("QPushButton { background-color: #3e3e42; border-radius: 4px; padding: 8px; margin-left: 10px; } QPushButton:hover { background-color: #505050; }")
+        self.btn_group_toggle.clicked.connect(self.toggle_group)
+        self.btn_group_toggle.hide()
+        top_bar.addWidget(self.btn_group_toggle)
+        
         top_bar.addStretch()
         main_layout.addLayout(top_bar)
 
@@ -154,6 +319,7 @@ class PaginationTab(QWidget):
         self.search_list.setStyleSheet("QListWidget { background-color: #1e1e1e; border: 1px solid #3e3e42; } QListWidget::item { padding: 5px; border-radius: 5px; } QListWidget::item:selected { background-color: #0e639c; }")
         self.search_list.itemSelectionChanged.connect(self.on_search_selection_changed)
         self.search_list.currentItemChanged.connect(self.on_org_item_selected)
+        self.search_list.setItemDelegate(SearchItemDelegate(self, self.search_list))
         col1_layout.addWidget(self.search_list)
         columns_splitter.addWidget(col1_frame)
         
@@ -179,6 +345,9 @@ class PaginationTab(QWidget):
         self.org_list.setDropIndicatorShown(True)
         self.org_list.setItemDelegate(PageNumberDelegate(self.org_list))
         self.org_list.currentItemChanged.connect(self.on_org_item_selected)
+        self.org_list.model().rowsMoved.connect(self._update_selected_images_order)
+        self.org_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.org_list.customContextMenuRequested.connect(self.show_org_context_menu)
         
         org_controls_layout = QHBoxLayout()
         self.btn_up = QPushButton("Move Up")
@@ -243,17 +412,152 @@ class PaginationTab(QWidget):
         folder = QFileDialog.getExistingDirectory(self, "Select Folder to Import")
         if folder:
             try:
-                entries = sorted(os.scandir(folder), key=lambda e: natural_key(e.name))
                 valid_exts = ('.jpg', '.jpeg', '.png', '.webp', '.bmp')
                 
-                for entry in entries:
-                    if entry.is_file() and entry.name.lower().endswith(valid_exts):
-                        path = entry.path
-                        if path not in self.selected_images:
-                            self.selected_images.append(path)
-                            self.add_to_org_list(path)
+                entries = list(os.scandir(folder))
+                has_subdirs = any(e.is_dir() for e in entries)
+                
+                if not has_subdirs:
+                    images = sorted([e.path for e in entries if e.is_file() and e.name.lower().endswith(valid_exts)], key=lambda p: natural_key(os.path.basename(p)))
+                    if images:
+                        for path in images:
+                            if path not in self.selected_images:
+                                self.selected_images.append(path)
+                                self.add_to_org_list(path)
+                else:
+                    leaf_folders = []
+                    for dirpath, dirnames, filenames in os.walk(folder):
+                        images = [os.path.join(dirpath, f) for f in filenames if f.lower().endswith(valid_exts)]
+                        if images:
+                            images = sorted(images, key=lambda p: natural_key(os.path.basename(p)))
+                            leaf_folders.append({
+                                'name': os.path.basename(dirpath),
+                                'path': dirpath,
+                                'images': images
+                            })
+                            
+                    if leaf_folders:
+                        self.last_imported_leaf_folders = leaf_folders
+                        self.is_grouped = True
+                        
+                        import sys
+                        base = getattr(sys, '_MEIPASS', os.path.abspath("."))
+                        from PyQt6.QtGui import QIcon
+                        self.btn_group_toggle.setIcon(QIcon(os.path.join(base, "assets", "uisvg", "ungroup.svg")))
+                        self.btn_group_toggle.setToolTip("Ungroup Folders")
+                        self.btn_group_toggle.show()
+                        
+                        self.render_batch_import()
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to read directory: {e}")
+
+    def toggle_group(self):
+        self.is_grouped = not self.is_grouped
+        import sys
+        base = getattr(sys, '_MEIPASS', os.path.abspath("."))
+        from PyQt6.QtGui import QIcon
+        if self.is_grouped:
+            self.btn_group_toggle.setIcon(QIcon(os.path.join(base, "assets", "uisvg", "ungroup.svg")))
+            self.btn_group_toggle.setToolTip("Ungroup Folders")
+        else:
+            self.btn_group_toggle.setIcon(QIcon(os.path.join(base, "assets", "uisvg", "group.svg")))
+            self.btn_group_toggle.setToolTip("Group Folders")
+            
+        self.render_batch_import()
+        
+    def render_batch_import(self):
+        leaf_folders = self.last_imported_leaf_folders
+        if not leaf_folders:
+            return
+            
+        conn = self.parent_dialog.shared_conn
+        cursor = conn.cursor()
+        cursor.execute("SELECT manga_id, title FROM CustomMangas")
+        existing_mangas = {row[1]: row[0] for row in cursor.fetchall()}
+        
+        skipped_folders = []
+        paths_to_thumb = []
+        
+        self.search_list.blockSignals(True)
+        self.search_list.clear()
+        
+        if self.is_grouped:
+            self.search_list.setViewMode(QListWidget.ViewMode.ListMode)
+            for sub in leaf_folders:
+                sub_images = sub['images']
+                sub_name = sub['name']
+                sub_path = sub['path']
+                
+                if sub_name in existing_mangas:
+                    m_id = existing_mangas[sub_name]
+                    cursor.execute("SELECT COUNT(*) FROM CustomMangaPages WHERE manga_id = ?", (m_id,))
+                    db_page_count = cursor.fetchone()[0]
+                    if len(sub_images) == db_page_count:
+                        cursor.execute("SELECT tag_name FROM CustomMangaTags WHERE manga_id = ?", (m_id,))
+                        tags = [r[0] for r in cursor.fetchall()]
+                        skipped_folders.append((sub_name, tags))
+                        continue
+                
+                item = QListWidgetItem()
+                item.setData(Qt.ItemDataRole.UserRole, sub_path)
+                item.setData(Qt.ItemDataRole.UserRole + 1, "folder")
+                item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
+                
+                widget = FolderItemWidget(sub_name, sub_images)
+                item.setSizeHint(widget.sizeHint())
+                
+                self.search_list.addItem(item)
+                self.search_list.setItemWidget(item, widget)
+                
+                paths_to_thumb.extend(sub_images[:10])
+        else:
+            self.search_list.setViewMode(QListWidget.ViewMode.IconMode)
+            from PyQt6.QtGui import QIcon, QPixmap
+            empty_pixmap = QPixmap(180, 180)
+            empty_pixmap.fill(Qt.GlobalColor.transparent)
+            empty_icon = QIcon(empty_pixmap)
+            
+            for sub in leaf_folders:
+                sub_images = sub['images']
+                sub_name = sub['name']
+                
+                if sub_name in existing_mangas:
+                    m_id = existing_mangas[sub_name]
+                    cursor.execute("SELECT COUNT(*) FROM CustomMangaPages WHERE manga_id = ?", (m_id,))
+                    db_page_count = cursor.fetchone()[0]
+                    if len(sub_images) == db_page_count:
+                        cursor.execute("SELECT tag_name FROM CustomMangaTags WHERE manga_id = ?", (m_id,))
+                        tags = [r[0] for r in cursor.fetchall()]
+                        skipped_folders.append((sub_name, tags))
+                        continue
+                        
+                for path in sub_images:
+                    item = QListWidgetItem()
+                    item.setToolTip(os.path.basename(path))
+                    item.setData(Qt.ItemDataRole.UserRole, path)
+                    item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
+                    item.setIcon(empty_icon)
+                    
+                    if path in self.selected_images:
+                        item.setSelected(True)
+                        
+                    self.search_list.addItem(item)
+                    paths_to_thumb.append(path)
+                    
+        self.search_list.blockSignals(False)
+        if paths_to_thumb:
+            self.thumb_thread.add_to_queue(paths_to_thumb)
+            
+        if skipped_folders and self.is_grouped:
+            if len(skipped_folders) == 1:
+                fname, ftags = skipped_folders[0]
+                msg = f"This '{fname}' already exists and is tagged with: {', '.join(ftags)}"
+            else:
+                msg = f"Skipped {len(skipped_folders)} already-tagged folders."
+            
+            if not hasattr(self, 'snackbar'):
+                self.snackbar = Snackbar(self)
+            self.snackbar.show_message(msg, 6000)
 
     def perform_search(self):
         query = self.search_input.text().strip()
@@ -265,6 +569,7 @@ class PaginationTab(QWidget):
         if hasattr(self, 'thumb_thread'):
             self.thumb_thread.clear_queue()
             
+        self.search_list.setViewMode(QListWidget.ViewMode.IconMode)
         self.search_list.blockSignals(True)
         self.search_list.clear()
         self.search_list.blockSignals(False)
@@ -321,12 +626,60 @@ class PaginationTab(QWidget):
         from PyQt6.QtGui import QIcon, QPixmap
         for i in range(self.search_list.count()):
             item = self.search_list.item(i)
-            if item.data(Qt.ItemDataRole.UserRole) == path:
-                item.setIcon(QIcon(QPixmap.fromImage(qimage)))
-                break
+            
+            if item.data(Qt.ItemDataRole.UserRole + 1) == "folder":
+                widget = self.search_list.itemWidget(item)
+                if widget and hasattr(widget, 'image_labels'):
+                    if path in widget.image_labels:
+                        pixmap = QPixmap.fromImage(qimage).scaled(60, 80, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+                        widget.image_labels[path].setPixmap(pixmap)
+                        return
+            else:
+                if item.data(Qt.ItemDataRole.UserRole) == path:
+                    item.setIcon(QIcon(QPixmap.fromImage(qimage)))
+                    break
 
     def on_search_selection_changed(self):
-        selected_in_search = set(item.data(Qt.ItemDataRole.UserRole) for item in self.search_list.selectedItems())
+        selected_items = self.search_list.selectedItems()
+        
+        is_folder_mode = False
+        for item in selected_items:
+            if item.data(Qt.ItemDataRole.UserRole + 1) == "folder":
+                is_folder_mode = True
+                break
+                
+        if not selected_items and self.search_list.count() > 0:
+            if self.search_list.item(0).data(Qt.ItemDataRole.UserRole + 1) == "folder":
+                self.org_list.clear()
+                self.selected_images.clear()
+                self.title_input.clear()
+                return
+
+        if is_folder_mode:
+            self.org_list.clear()
+            self.selected_images.clear()
+            valid_exts = ('.jpg', '.jpeg', '.png', '.webp', '.bmp')
+            
+            for item in selected_items:
+                if item.data(Qt.ItemDataRole.UserRole + 1) == "folder":
+                    folder_path = item.data(Qt.ItemDataRole.UserRole)
+                    try:
+                        entries = sorted(os.scandir(folder_path), key=lambda e: natural_key(e.name))
+                        for entry in entries:
+                            if entry.is_file() and entry.name.lower().endswith(valid_exts):
+                                self.selected_images.append(entry.path)
+                                self.add_to_org_list(entry.path)
+                    except Exception:
+                        pass
+                        
+            if selected_items:
+                folder_name = os.path.basename(selected_items[-1].data(Qt.ItemDataRole.UserRole))
+                self.title_input.setText(folder_name)
+                if self.org_list.count() > 0:
+                    self.org_list.setCurrentRow(0)
+            return
+
+        selected_in_search = set(item.data(Qt.ItemDataRole.UserRole) for item in selected_items)
         
         visible_in_search = set(self.search_list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.search_list.count()))
         
@@ -343,9 +696,12 @@ class PaginationTab(QWidget):
                         self.org_list.takeItem(i)
                         break
 
-    def add_to_org_list(self, path):
+        self.search_list.viewport().update()
+
+    def add_to_org_list(self, path, is_attached=False):
         item = QListWidgetItem(os.path.basename(path))
         item.setData(Qt.ItemDataRole.UserRole, path)
+        item.setData(Qt.ItemDataRole.UserRole + 2, is_attached)
         self.org_list.addItem(item)
 
     def move_up(self):
@@ -379,11 +735,13 @@ class PaginationTab(QWidget):
                     search_item.setSelected(False)
                     break
             self.search_list.blockSignals(False)
+        self.search_list.viewport().update()
 
     def _update_selected_images_order(self):
         self.selected_images.clear()
         for i in range(self.org_list.count()):
             self.selected_images.append(self.org_list.item(i).data(Qt.ItemDataRole.UserRole))
+        self.search_list.viewport().update()
 
     def on_org_item_selected(self, current, previous):
         if not current:
@@ -395,6 +753,43 @@ class PaginationTab(QWidget):
         path = current.data(Qt.ItemDataRole.UserRole)
         self.current_preview_path = path
         self.preview_timer.start()
+
+    def show_org_context_menu(self, pos):
+        item = self.org_list.itemAt(pos)
+        if not item:
+            return
+            
+        row = self.org_list.row(item)
+        from PyQt6.QtWidgets import QMenu
+        menu = QMenu(self)
+        menu.setStyleSheet("QMenu { background-color: #252526; color: #d4d4d4; border: 1px solid #333; }"
+                           "QMenu::item { padding: 6px 24px 6px 24px; background: transparent; }"
+                           "QMenu::item:selected { background-color: #0e639c; }")
+                           
+        is_attached = item.data(Qt.ItemDataRole.UserRole + 2)
+        is_attached_to_prev = False
+        if row > 0:
+            prev_item = self.org_list.item(row - 1)
+            if prev_item:
+                is_attached_to_prev = prev_item.data(Qt.ItemDataRole.UserRole + 2)
+        
+        if is_attached:
+            action = menu.addAction("Detach from Next Page")
+            action.triggered.connect(lambda: self.set_attached_state(item, False))
+        else:
+            if row < self.org_list.count() - 1:
+                action = menu.addAction("Attach to Next Page (Double Spread)")
+                action.triggered.connect(lambda: self.set_attached_state(item, True))
+                
+        if is_attached_to_prev:
+            action2 = menu.addAction("Detach from Previous Page")
+            action2.triggered.connect(lambda r=row: self.set_attached_state(self.org_list.item(r - 1), False))
+                
+        menu.exec(self.org_list.mapToGlobal(pos))
+        
+    def set_attached_state(self, item, state):
+        item.setData(Qt.ItemDataRole.UserRole + 2, state)
+        self.org_list.viewport().update()
 
     def load_preview_image(self):
         path = getattr(self, 'current_preview_path', None)
@@ -429,6 +824,7 @@ class PaginationTab(QWidget):
         self.org_list.clear()
         self.search_list.clear()
         self.search_input.clear()
+        self.btn_group_toggle.hide()
         self.lbl_preview.setText("Select an image to preview")
         self.lbl_preview.setPixmap(QPixmap())
         self.btn_create.setText("Create Comic/Manga")
@@ -446,6 +842,13 @@ class PaginationTab(QWidget):
             conn = self.parent_dialog.shared_conn
             cursor = conn.cursor()
             
+            try:
+                cursor.execute("ALTER TABLE CustomMangaPages ADD COLUMN attached_to_next BOOLEAN DEFAULT 0")
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass
+
+            
             cursor.execute("SELECT title FROM CustomMangas WHERE manga_id = ?", (manga_id,))
             row = cursor.fetchone()
             if not row:
@@ -455,18 +858,17 @@ class PaginationTab(QWidget):
             cursor.execute("SELECT tag_name FROM CustomMangaTags WHERE manga_id = ?", (manga_id,))
             tags = [r[0] for r in cursor.fetchall()]
             
-            cursor.execute("SELECT image_path FROM CustomMangaPages WHERE manga_id = ? ORDER BY page_number ASC", (manga_id,))
-            pages = [r[0] for r in cursor.fetchall()]
-            
+            cursor.execute("SELECT image_path, attached_to_next FROM CustomMangaPages WHERE manga_id = ? ORDER BY page_number ASC", (manga_id,))
+            pages = cursor.fetchall()
             
             self.clear_manga_state()
             self.loaded_manga_id = manga_id
             self.title_input.setText(title)
             self.tags_input.setText(", ".join(tags))
             
-            for path in pages:
+            for path, is_attached in pages:
                 self.selected_images.append(path)
-                self.add_to_org_list(path)
+                self.add_to_org_list(path, bool(is_attached))
                 
             self.btn_create.setText("Save Changes")
             
@@ -489,13 +891,26 @@ class PaginationTab(QWidget):
             QMessageBox.warning(self, "Empty Manga", "Please add at least one page to the manga.")
             return
             
-        tags = [t.strip() for t in self.tags_input.text().split(',') if t.strip()]
+        tags = []
+        for t in self.tags_input.text().split(','):
+            t = t.strip()
+            if ':' in t:
+                t = t.split(':', 1)[1].strip()
+            if t:
+                tags.append(t)
         cover = self.selected_images[0]
         
         try:
             conn = self.parent_dialog.shared_conn
             cursor = conn.cursor()
             
+            try:
+                cursor.execute("ALTER TABLE CustomMangaPages ADD COLUMN attached_to_next BOOLEAN DEFAULT 0")
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass
+            
+
             if self.loaded_manga_id is None:
                 cursor.execute("SELECT manga_id FROM CustomMangas WHERE title = ?", (title,))
                 if cursor.fetchone():
@@ -519,8 +934,14 @@ class PaginationTab(QWidget):
                 cursor.execute("DELETE FROM CustomMangaPages WHERE manga_id = ?", (manga_id,))
                 cursor.execute("DELETE FROM CustomMangaTags WHERE manga_id = ?", (manga_id,))
 
-            page_records = [(manga_id, path, idx + 1) for idx, path in enumerate(self.selected_images)]
-            cursor.executemany("INSERT INTO CustomMangaPages (manga_id, image_path, page_number) VALUES (?, ?, ?)", page_records)
+            page_records = []
+            for i in range(self.org_list.count()):
+                item = self.org_list.item(i)
+                path = item.data(Qt.ItemDataRole.UserRole)
+                is_attached = bool(item.data(Qt.ItemDataRole.UserRole + 2))
+                page_records.append((manga_id, path, i + 1, is_attached))
+                
+            cursor.executemany("INSERT INTO CustomMangaPages (manga_id, image_path, page_number, attached_to_next) VALUES (?, ?, ?, ?)", page_records)
             
             if tags:
                 tag_records = [(manga_id, tag) for tag in tags]

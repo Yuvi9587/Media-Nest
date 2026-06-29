@@ -21,7 +21,7 @@ from Src.Logic.paths import resource_path
 
 class ClickableFrame(QFrame):
     """A custom widget that acts like a button so we can click the whole video card."""
-    clicked = pyqtSignal(str)
+    clicked = pyqtSignal(str, object)
     
     def __init__(self, path, parent=None):
         super().__init__(parent)
@@ -29,7 +29,7 @@ class ClickableFrame(QFrame):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def mousePressEvent(self, event):
-        self.clicked.emit(self.path)
+        self.clicked.emit(self.path, self)
         super().mousePressEvent(event)
 
 
@@ -169,6 +169,7 @@ class VideoDedupTab(QWidget):
         self.thumb_worker = ThumbnailWorker(self.ffmpeg_path)
         self.thumb_worker.result_ready.connect(self.apply_thumbnail)
         self.thumbnail_labels = {}
+        self.active_video_widget = None
         
         self.setup_ui()
 
@@ -222,8 +223,10 @@ class VideoDedupTab(QWidget):
         if os.path.exists(self.cli_path):
             self.btn_download.hide()
         
-        self.lbl_status = QLabel("Ready to find exact duplicate videos.")
-        self.lbl_status.setStyleSheet("color: #0e639c; font-weight: bold; border: none; margin-left: 10px;")
+        self.lbl_status = QPushButton("Ready to find exact duplicate videos.")
+        self.lbl_status.setStyleSheet("color: #0e639c; font-weight: bold; border: none; margin-left: 10px; text-align: left; background: transparent;")
+        self.lbl_status.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.lbl_status.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         action_row.addWidget(self.btn_scan)
         action_row.addWidget(self.btn_download)
@@ -261,8 +264,10 @@ class VideoDedupTab(QWidget):
         self.preview_frame.setStyleSheet("background-color: #252526; border: 1px solid #3e3e42; border-radius: 4px;")
         preview_layout = QVBoxLayout(self.preview_frame)
         
-        self.lbl_preview_title = QLabel("Video Player (Click a video to play)")
-        self.lbl_preview_title.setStyleSheet("font-weight: bold; font-size: 1.1em; color: #ffffff; border: none;")
+        self.lbl_preview_title = QPushButton("Video Player (Click a video to play)")
+        self.lbl_preview_title.setStyleSheet("font-weight: bold; font-size: 1.1em; color: #ffffff; border: none; text-align: left; background: transparent;")
+        self.lbl_preview_title.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.lbl_preview_title.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         preview_layout.addWidget(self.lbl_preview_title)
         
         self.video_widget = QVideoWidget()
@@ -293,6 +298,11 @@ class VideoDedupTab(QWidget):
         self.btn_skip_forward.setStyleSheet("background-color: #3e3e42; border-radius: 4px; padding: 5px 12px;")
         self.btn_skip_forward.clicked.connect(lambda: self.media_player.setPosition(self.media_player.position() + 10000))
 
+        self.btn_external = QPushButton("Open Externally")
+        self.btn_external.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_external.setStyleSheet("background-color: #3e3e42; border-radius: 4px; padding: 5px 12px; font-weight: bold; color: white;")
+        self.btn_external.clicked.connect(self.open_external_player)
+
         self.time_slider = QSlider(Qt.Orientation.Horizontal)
         self.time_slider.setCursor(Qt.CursorShape.PointingHandCursor)
         self.time_slider.setStyleSheet("""
@@ -308,6 +318,7 @@ class VideoDedupTab(QWidget):
         controls_layout.addWidget(self.btn_skip_back)
         controls_layout.addWidget(self.btn_play_pause)
         controls_layout.addWidget(self.btn_skip_forward)
+        controls_layout.addWidget(self.btn_external)
         controls_layout.addWidget(self.time_slider, stretch=1)
         controls_layout.addWidget(self.lbl_time)
         
@@ -316,6 +327,8 @@ class VideoDedupTab(QWidget):
         self.media_player.positionChanged.connect(self.on_position_changed)
         self.media_player.durationChanged.connect(self.on_duration_changed)
         self.media_player.playbackStateChanged.connect(self.on_playback_state_changed)
+        self.media_player.mediaStatusChanged.connect(self.on_media_status_changed)
+        self.media_player.errorOccurred.connect(self.on_media_error)
         self.time_slider.sliderMoved.connect(self.media_player.setPosition)
 
         right_panel.addWidget(self.preview_frame)
@@ -467,11 +480,29 @@ class VideoDedupTab(QWidget):
             QMessageBox.critical(self, "Download Error", f"Failed to download the engine:\n{msg}")
 
 
-    @pyqtSlot(str)
-    def play_video(self, file_path):
-        self.lbl_preview_title.setText(f"▶️ Playing: {os.path.basename(file_path)}")
+    @pyqtSlot(str, object)
+    def play_video(self, file_path, widget=None):
+        play_icon = resource_path(os.path.join("assets", "uisvg", "play.svg")).replace('\\', '/')
+        self.lbl_preview_title.setIcon(QIcon(play_icon))
+        self.lbl_preview_title.setText(f" Playing: {os.path.basename(file_path)}")
+        self._autoplay_pending = True
+        
+        if getattr(self, 'active_video_widget', None):
+            try:
+                self.active_video_widget.setStyleSheet("""
+                    QFrame { background-color: #1e1e1e; border-radius: 6px; border: 1px solid #454545; }
+                    QFrame:hover { border: 1px solid #8957e5; background-color: #2a2a2a; }
+                """)
+            except RuntimeError:
+                self.active_video_widget = None
+            
+        self.active_video_widget = widget
+        if self.active_video_widget:
+            self.active_video_widget.setStyleSheet("""
+                QFrame { background-color: rgba(137, 87, 229, 0.15); border-radius: 6px; border: 2px solid #8957e5; }
+            """)
+            
         self.media_player.setSource(QUrl.fromLocalFile(file_path))
-        self.media_player.play()
 
     def toggle_play_pause(self):
         if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
@@ -506,6 +537,30 @@ class VideoDedupTab(QWidget):
             
         self.lbl_time.setText(f"{format_ms(position)} / {format_ms(duration)}")
 
+    def on_media_status_changed(self, status):
+        # Auto-play as soon as the media is actually ready (avoids 0xC00D6D60)
+        if status in (QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia):
+            if getattr(self, '_autoplay_pending', False):
+                self._autoplay_pending = False
+                self.media_player.play()
+
+    def on_media_error(self, error, error_string):
+        self.log_console.append(f"> Media Player Error: {error_string} (Code: {error})")
+        source = self.media_player.source().toLocalFile()
+        if source:
+            warn_icon = resource_path(os.path.join("assets", "uisvg", "warning.svg")).replace('\\', '/')
+            self.lbl_preview_title.setIcon(QIcon(warn_icon))
+            self.lbl_preview_title.setText(" Playback Error - Opening in System Player")
+            QMessageBox.warning(self, "Unsupported Video Codec", f"Windows cannot play this video natively.\n\nError: {error_string}\n\nOpening it in your default system player instead (e.g. VLC or Windows Media Player).")
+            try: os.startfile(source)
+            except Exception as e: self.log_console.append(f"> Failed to open externally: {e}")
+
+    def open_external_player(self):
+        source = self.media_player.source().toLocalFile()
+        if source:
+            try: os.startfile(source)
+            except Exception as e: self.log_console.append(f"> Failed to open externally: {e}")
+
 
     def start_cli_scan(self):
         if not os.path.exists(self.cli_path) or not os.path.exists(self.ffmpeg_path):
@@ -523,6 +578,11 @@ class VideoDedupTab(QWidget):
         try:
             cursor.execute("SELECT file_path FROM Images")
             all_files = [row[0] for row in cursor.fetchall() if row[0]]
+            try:
+                cursor.execute("SELECT file_path FROM tagless")
+                all_files.extend([row[0] for row in cursor.fetchall() if row[0]])
+            except sqlite3.OperationalError:
+                pass
         except sqlite3.OperationalError:
             cursor.execute("SELECT file_name FROM characters")
             all_files = [row[0] for row in cursor.fetchall() if row[0]]
@@ -580,7 +640,9 @@ class VideoDedupTab(QWidget):
             args.extend(["--include", folder])
 
         self.btn_scan.setEnabled(False)
-        self.lbl_status.setText("⏳ Scanning... Please wait.")
+        load_icon = resource_path(os.path.join("assets", "uisvg", "loading.svg")).replace('\\', '/')
+        self.lbl_status.setIcon(QIcon(load_icon))
+        self.lbl_status.setText(" Scanning... Please wait.")
         self.log_console.clear()
         
         self.dl_progress.setValue(0)
@@ -616,7 +678,9 @@ class VideoDedupTab(QWidget):
                 if match:
                     percent = float(match.group(1))
                     self.dl_progress.setValue(int(percent))
-                    self.lbl_status.setText(f"⏳ Scanning... {percent:.1f}%")
+                    load_icon = resource_path(os.path.join("assets", "uisvg", "loading.svg")).replace('\\', '/')
+                    self.lbl_status.setIcon(QIcon(load_icon))
+                    self.lbl_status.setText(f" Scanning... {percent:.1f}%")
                 
                 if "ETA" in line or "]" in line:
                     continue
@@ -637,7 +701,9 @@ class VideoDedupTab(QWidget):
                 if match:
                     percent = float(match.group(1))
                     self.dl_progress.setValue(int(percent))
-                    self.lbl_status.setText(f"⏳ Scanning... {percent:.1f}%")
+                    load_icon = resource_path(os.path.join("assets", "uisvg", "loading.svg")).replace('\\', '/')
+                    self.lbl_status.setIcon(QIcon(load_icon))
+                    self.lbl_status.setText(f" Scanning... {percent:.1f}%")
                 
                 if "ETA" in line or "]" in line:
                     continue
@@ -747,10 +813,16 @@ class VideoDedupTab(QWidget):
                 v_layout = QVBoxLayout(vid_widget)
                 v_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-                lbl_thumb = QLabel("⏳ Loading Thumbnail...")
+                load_icon = resource_path(os.path.join("assets", "uisvg", "loading.svg")).replace('\\', '/')
+                lbl_thumb = QToolButton()
+                lbl_thumb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+                lbl_thumb.setIcon(QIcon(load_icon))
+                lbl_thumb.setIconSize(QSize(20, 20))
+                lbl_thumb.setText("Loading Thumbnail...")
                 lbl_thumb.setFixedSize(220, 124) 
                 lbl_thumb.setStyleSheet("background-color: #000000; border-radius: 4px; color: #888888; border: none;")
-                lbl_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                lbl_thumb.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                lbl_thumb.setFocusPolicy(Qt.FocusPolicy.NoFocus)
                 self.thumbnail_labels[v_path] = lbl_thumb 
                 
                 dur_str = vid.get('Duration', '00:00:00')
@@ -772,16 +844,28 @@ class VideoDedupTab(QWidget):
                     checkbox_refs.append(cb)
                     v_layout.addWidget(cb)
 
-                info_text = (
-                    f"<b style='color: white;'>{v_name[:25]}...</b><br>"
-                    f"<span style='color: #a0a0a0; font-size: 0.77em;'>"
-                    f"{vid.get('FrameSize','N/A')} | {vid.get('Size','N/A')}<br>"
-                    f"⏱️ {vid.get('Duration','N/A')}"
-                    f"</span>"
-                )
-                lbl_info = QLabel(info_text)
-                lbl_info.setWordWrap(True)
-                lbl_info.setStyleSheet("border: none; margin-top: 5px;")
+                info_layout = QVBoxLayout()
+                info_layout.setSpacing(2)
+                info_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                
+                lbl_top = QLabel(f"<b style='color: white;'>{v_name[:25]}...</b><br><span style='color: #a0a0a0; font-size: 0.77em;'>{vid.get('FrameSize','N/A')} | {vid.get('Size','N/A')}</span>")
+                lbl_top.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                lbl_top.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                
+                clock_icon = resource_path(os.path.join("assets", "uisvg", "clock.svg")).replace('\\', '/')
+                lbl_dur = QPushButton(f" {vid.get('Duration','N/A')}")
+                lbl_dur.setIcon(QIcon(clock_icon))
+                lbl_dur.setStyleSheet("color: #a0a0a0; font-size: 0.77em; border: none; text-align: center; background: transparent;")
+                lbl_dur.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                lbl_dur.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+                
+                info_layout.addWidget(lbl_top)
+                info_layout.addWidget(lbl_dur)
+                
+                info_container = QWidget()
+                info_container.setLayout(info_layout)
+                
+                v_layout.addWidget(info_container)
 
                 btn_del = QPushButton("Recycle Bin")
                 btn_del.setStyleSheet("""
@@ -808,19 +892,23 @@ class VideoDedupTab(QWidget):
         cursor = conn.cursor()
 
         path_to_hash = {}
+        cursor.execute("SELECT file_path, hash FROM Images")
+        db_paths = {os.path.normcase(p): h for p, h in cursor.fetchall()}
+        try:
+            cursor.execute("SELECT file_path, hash FROM tagless")
+            db_paths.update({os.path.normcase(p): h for p, h in cursor.fetchall()})
+        except sqlite3.OperationalError:
+            pass
+
         for item in group_items:
-            path = item['Path']
-            cursor.execute("SELECT hash FROM Images WHERE file_path = ?", (path,))
-            res = cursor.fetchone()
-            if res: 
-                path_to_hash[path] = res[0]
-            else:
-                cursor.execute("SELECT hash FROM tagless WHERE file_path = ?", (path,))
-                res = cursor.fetchone()
-                if res: path_to_hash[path] = res[0]
+            norm_path = os.path.normcase(item['Path'])
+            if norm_path in db_paths:
+                path_to_hash[item['Path']] = db_paths[norm_path]
 
         all_paths = [item['Path'] for item in group_items if item['Path'] in path_to_hash]
         if len(all_paths) < 2:
+            QMessageBox.warning(self, "Error", "Could not locate these videos in the database. Please rescan your library.")
+            self.log_console.append("> Failed to mark exception: Database hash missing for videos.")
             return 
 
         pairs_to_ignore = []
@@ -878,6 +966,9 @@ class VideoDedupTab(QWidget):
 
         group_card.setParent(None)
         group_card.deleteLater()
+        
+        self.clear_player_if_playing([item['Path'] for item in group_items])
+            
         self.log_console.append("> Exception saved. These videos will be ignored in all future scans.")
 
     def delete_video_duplicate(self, file_path, widget_to_remove, group_card, videos_layout):
@@ -886,10 +977,7 @@ class VideoDedupTab(QWidget):
         
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                if self.media_player.source().toLocalFile() == file_path:
-                    self.media_player.stop()
-                    self.media_player.setSource(QUrl())
-                    self.lbl_preview_title.setText("Video Player (Click a video to play)")
+                self.clear_player_if_playing([file_path])
 
                 if os.path.exists(file_path): 
                     send2trash(file_path)
@@ -915,13 +1003,38 @@ class VideoDedupTab(QWidget):
                 widget_to_remove.setParent(None)
                 widget_to_remove.deleteLater()
                 
-                active_count = sum(1 for i in range(videos_layout.count()) if videos_layout.itemAt(i).widget() is not None)
-                if active_count <= 1:
+                active_widgets = [videos_layout.itemAt(i).widget() for i in range(videos_layout.count()) if videos_layout.itemAt(i) and videos_layout.itemAt(i).widget()]
+                if len(active_widgets) <= 1:
                     group_card.setParent(None)
                     group_card.deleteLater()
+                    
+                    remaining_paths = []
+                    for w in active_widgets:
+                        if hasattr(w, 'path'): remaining_paths.append(w.path)
+                    self.clear_player_if_playing(remaining_paths)
+                    
                     self.log_console.append("> Only 1 file remaining. Group resolved and removed from view.")
+                elif len(active_widgets) == 2:
+                    for w in active_widgets:
+                        for child in w.findChildren(QCheckBox):
+                            child.setParent(None)
+                            child.deleteLater()
                 
                 self.log_console.append(f"> Deleted: {os.path.basename(file_path)}")
                 
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Could not delete file: {e}")
+
+    def clear_player_if_playing(self, paths):
+        current_playing = self.media_player.source().toLocalFile()
+        if not current_playing: return
+        
+        norm_playing = os.path.normcase(current_playing)
+        norm_paths = [os.path.normcase(p) for p in paths]
+        
+        if norm_playing in norm_paths:
+            self.media_player.stop()
+            self.media_player.setSource(QUrl())
+            self.media_player.setVideoOutput(None)
+            self.media_player.setVideoOutput(self.video_widget)
+            self.lbl_preview_title.setText("Video Player (Click a video to play)")

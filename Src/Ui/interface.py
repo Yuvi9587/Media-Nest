@@ -697,11 +697,26 @@ class MainWindowUI:
             QPushButton:hover { background-color: #505050; }
         """)
 
+        self.btn_terminal = QPushButton()
+        self.btn_terminal.setIcon(QIcon(resource_path(os.path.join("assets", "uisvg", "terminal.svg"))))
+        self.btn_terminal.setIconSize(QSize(24, 24))
+        self.btn_terminal.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_terminal.setFixedSize(45, 45)
+        self.btn_terminal.setToolTip("Power Terminal")
+        self.btn_terminal.setStyleSheet("""
+            QPushButton {
+                background-color: #3e3e42;
+                border-radius: 10px;
+            }
+            QPushButton:hover { background-color: #8957e5; }
+        """)
+
         self.header_layout.addWidget(self.btn_open)
         self.header_layout.addWidget(self.btn_load_db)
         self.header_layout.addWidget(self.btn_change_db)
         self.header_layout.addWidget(self.btn_detach)
         self.header_layout.addWidget(self.btn_support)
+        self.header_layout.addWidget(self.btn_terminal)
         self.header_layout.addStretch()
 
         self.sidebar_layout.addWidget(self.header_frame)

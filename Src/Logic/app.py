@@ -35,6 +35,7 @@ from Src.Dialogs.settings_dialog import SettingsDialog
 from Src.Ui.theme import VSCODE_DARK_THEME
 from Src.Dialogs.setup_dialog import FirstTimeSetupDialog
 from Src.Dialogs.support_dialog import SupportDialog
+from Src.Logic.terminal import TerminalDialog
 
 class VideoThumbnailer(QObject):
     thumbnail_ready = pyqtSignal(str, QImage)
@@ -655,7 +656,11 @@ class DatabaseSearchWorker(QThread):
                 if all_tags:
                     custom_query = f"""
                         WITH CustomAllTags AS (
-                            SELECT manga_id, LOWER(REPLACE(tag_name, ' ', '_')) as tag
+                            SELECT manga_id, LOWER(REPLACE(
+                                CASE WHEN instr(tag_name, ':') > 0 
+                                     THEN substr(tag_name, instr(tag_name, ':') + 1) 
+                                     ELSE tag_name END, 
+                            ' ', '_')) as tag
                             FROM CustomMangaTags
                             UNION
                             SELECT manga_id, LOWER(REPLACE(title, ' ', '_')) as tag
@@ -726,7 +731,11 @@ class TagFetchWorker(QThread):
             
             tags = []
             
-            if not self.file_path.startswith("custom_manga:"):
+            if self.file_path.startswith("custom_manga:"):
+                manga_id = int(self.file_path.split("|")[0].replace("custom_manga:", ""))
+                cursor.execute("SELECT tag_name FROM CustomMangaTags WHERE manga_id = ?", (manga_id,))
+                tags = [r[0] for r in cursor.fetchall()]
+            else:
                 query = """
                     SELECT Tags.tag_name 
                     FROM Tags
@@ -1213,6 +1222,7 @@ class MediaExplorerApp(QMainWindow):
         self.ui.btn_change_db.clicked.connect(self.open_settings_dialog)        
         self.ui.btn_detach.clicked.connect(self.toggle_detached_viewer)
         self.ui.btn_support.clicked.connect(self.open_support_dialog)
+        self.ui.btn_terminal.clicked.connect(self.open_terminal_dialog)
         self.floating_viewer = None
         self.ui.tree_view.expanded.connect(self.on_item_expanded)
         self.ui.tree_view.clicked.connect(self.on_tree_item_clicked)
@@ -1568,6 +1578,15 @@ class MediaExplorerApp(QMainWindow):
     def open_support_dialog(self):
         """Opens the Support & Community dialog."""
         dialog = SupportDialog(self)
+        dialog.exec()
+
+    def open_terminal_dialog(self):
+        """Opens the Power Terminal dialog."""
+        if not getattr(self, 'db_connection', None):
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "No Database", "Please load a database first!")
+            return
+        dialog = TerminalDialog(self.db_connection, self)
         dialog.exec()
 
 
@@ -2137,7 +2156,8 @@ class MediaExplorerApp(QMainWindow):
 
             if event.type() == QEvent.Type.KeyPress:
                 self.last_mouse_button = Qt.MouseButton.NoButton
-                if obj.__class__.__name__ != "QLineEdit":
+                # Only intercept file operations if the tree or gallery specifically has focus
+                if obj in (self.ui.tree_view, self.ui.gallery_section.list_widget):
                     if event.matches(QKeySequence.StandardKey.Copy):
                         self.shortcut_copy()
                         return True
@@ -2518,8 +2538,8 @@ class MediaExplorerApp(QMainWindow):
             conn = sqlite3.connect(self.current_db_path)
             conn.execute("PRAGMA journal_mode=WAL;")
             cursor = conn.cursor()
-            cursor.execute("SELECT image_path FROM CustomMangaPages WHERE manga_id = ? ORDER BY page_number ASC", (manga_id,))
-            paths = [row[0].strip() for row in cursor.fetchall()]
+            cursor.execute("SELECT image_path, attached_to_next FROM CustomMangaPages WHERE manga_id = ? ORDER BY page_number ASC", (manga_id,))
+            paths = [(row[0].strip(), bool(row[1])) for row in cursor.fetchall()]
             conn.close()
         except Exception as e:
             print(f"Exception in show_custom_manga: {e}")
@@ -2767,7 +2787,13 @@ class MediaExplorerApp(QMainWindow):
             conn.execute("PRAGMA journal_mode=WAL;")
             cursor = conn.cursor()
 
-            cursor.execute("INSERT OR IGNORE INTO Tags (tag_name) VALUES (?)", (new_tag,))
+            ns = "general"
+            if ":" in new_tag:
+                parts = new_tag.split(":", 1)
+                ns = parts[0].strip()
+                new_tag = parts[1].strip()
+
+            cursor.execute("INSERT OR IGNORE INTO Tags (tag_name, tag_type) VALUES (?, ?)", (new_tag, ns))
             cursor.execute("SELECT tag_id FROM Tags WHERE tag_name = ?", (new_tag,))
             tag_id_row = cursor.fetchone()
             if not tag_id_row: return
@@ -2932,6 +2958,19 @@ class MediaExplorerApp(QMainWindow):
     def process_search(self):
         text = self.ui.search_bar.text()
         search_text = text.strip().lower()
+        
+        if search_text.startswith("search:"):
+            if getattr(self, 'db_connection', None) and hasattr(self, 'current_db_path'):
+                try:
+                    from Src.Logic.smart_search import parse_natural_language_query
+                    cur = self.db_connection.cursor()
+                    matched_tags = parse_natural_language_query(search_text, cur)
+                    if matched_tags:
+                        search_text = ", ".join(matched_tags)
+                    else:
+                        search_text = "___no_match___"
+                except Exception as e:
+                    print("Smart search error:", e)
         
         self.clear_player_timer.start(200) 
 
@@ -3360,8 +3399,9 @@ class MediaExplorerApp(QMainWindow):
             if not unresolved_tags:
                 return
 
-            db_folder = os.path.dirname(self.current_db_path)
-            alltags_db_path = os.path.join(db_folder, "AllTags.db")
+            appdata_dir = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "appdata")
+            os.makedirs(appdata_dir, exist_ok=True)
+            alltags_db_path = os.path.join(appdata_dir, "AllTags.db")
             if not os.path.exists(alltags_db_path):
                 return
 
@@ -3418,11 +3458,15 @@ class MediaExplorerApp(QMainWindow):
             self.current_db_path = db_path
             self.db_connection = sqlite3.connect(db_path, check_same_thread=False)
             self.db_connection.execute("PRAGMA journal_mode=WAL;")
+            try:
+                self.db_connection.execute("CREATE INDEX IF NOT EXISTS idx_imagetags_tag_id ON ImageTags(tag_id);")
+            except:
+                pass
             
             cursor = self.db_connection.cursor()
             
             cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangas (manga_id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, cover_image TEXT)")
-            cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangaPages (manga_id INTEGER, image_path TEXT, page_number INTEGER, PRIMARY KEY (manga_id, page_number))")
+            cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangaPages (manga_id INTEGER, image_path TEXT, page_number INTEGER, attached_to_next BOOLEAN DEFAULT 0, PRIMARY KEY (manga_id, page_number))")
             cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangaTags (manga_id INTEGER, tag_name TEXT, PRIMARY KEY (manga_id, tag_name))")
             
             # Migrate Images table
@@ -3436,6 +3480,13 @@ class MediaExplorerApp(QMainWindow):
             try:
                 cursor.execute("ALTER TABLE tagless ADD COLUMN file_size INTEGER")
                 print("Added 'file_size' column to tagless table.")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+            # Migrate CustomMangaPages table
+            try:
+                cursor.execute("ALTER TABLE CustomMangaPages ADD COLUMN attached_to_next BOOLEAN DEFAULT 0")
+                print("Added 'attached_to_next' column to CustomMangaPages table.")
             except sqlite3.OperationalError:
                 pass  # Column already exists
 

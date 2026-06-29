@@ -586,26 +586,68 @@ class MangaReaderWidget(QWidget):
         self.load_pages(files, jump_to_path)
 
     def load_pages(self, paths, jump_to_path=None):
-        self.paths = paths
-        self.current_page = 0
-        if jump_to_path and jump_to_path in self.paths:
-            self.current_page = self.paths.index(jump_to_path)
+        if paths and isinstance(paths[0], str):
+            self.paths = [(p, False) for p in paths]
+        else:
+            self.paths = paths
             
-        self.lbl_total.setText(f"/ {len(self.paths)}")
+        self.spreads = []
+        i = 0
+        while i < len(self.paths):
+            p, is_attached = self.paths[i]
+            if is_attached and i + 1 < len(self.paths):
+                self.spreads.append((p, self.paths[i+1][0]))
+                i += 2
+            else:
+                self.spreads.append((p,))
+                i += 1
+                
+        self.current_page = 0
+        if jump_to_path:
+            for idx, spread in enumerate(self.spreads):
+                if jump_to_path in spread:
+                    self.current_page = idx
+                    break
+                    
+        self.lbl_total.setText(f"/ {len(self.spreads)}")
         self.load_page()
 
     def load_page(self):
-        if not self.paths or self.current_page < 0 or self.current_page >= len(self.paths):
+        if not hasattr(self, 'spreads') or not self.spreads or self.current_page < 0 or self.current_page >= len(self.spreads):
             return
             
-        path = self.paths[self.current_page]
+        spread = self.spreads[self.current_page]
         self.page_input.setText(str(self.current_page + 1))
         
-        reader = QImageReader(path)
+        reader = QImageReader(spread[0])
         image = reader.read()
-        if not image.isNull():
-            pixmap = QPixmap.fromImage(image)
-            self.image_label.set_raw_pixmap(pixmap)
+        
+        if len(spread) == 2:
+            next_reader = QImageReader(spread[1])
+            next_image = next_reader.read()
+            
+            if not image.isNull() and not next_image.isNull():
+                target_h = max(image.height(), next_image.height())
+                
+                if image.height() != target_h:
+                    image = image.scaledToHeight(target_h, Qt.TransformationMode.SmoothTransformation)
+                if next_image.height() != target_h:
+                    next_image = next_image.scaledToHeight(target_h, Qt.TransformationMode.SmoothTransformation)
+                    
+                combined = QPixmap(image.width() + next_image.width(), target_h)
+                combined.fill(Qt.GlobalColor.black)
+                
+                painter = QPainter(combined)
+                painter.drawImage(0, 0, image)
+                painter.drawImage(image.width(), 0, next_image)
+                painter.end()
+                
+                self.image_label.set_raw_pixmap(combined)
+            elif not image.isNull():
+                self.image_label.set_raw_pixmap(QPixmap.fromImage(image))
+        else:
+            if not image.isNull():
+                self.image_label.set_raw_pixmap(QPixmap.fromImage(image))
             
         self.setFocus()
 
@@ -615,14 +657,14 @@ class MangaReaderWidget(QWidget):
             self.load_page()
 
     def next_page(self):
-        if self.current_page < len(self.paths) - 1:
+        if self.current_page < len(self.spreads) - 1:
             self.current_page += 1
             self.load_page()
             
     def jump_to_page(self):
         try:
             page = int(self.page_input.text()) - 1
-            if 0 <= page < len(self.paths):
+            if 0 <= page < len(self.spreads):
                 self.current_page = page
                 self.load_page()
             else:

@@ -1769,7 +1769,28 @@ class SettingsDialog(QDialog):
             if getattr(self, 'is_global_delete', False):
                 if self.auto_delete_mode == "safe": self.auto_delete_mode = "aggressive"
                 else: self.auto_delete_mode = "safe"
-                self.start_dedupe_scan(is_auto_rescan=True)
+                
+                groups_to_keep = []
+                for gd in self.current_duplicate_groups:
+                    valid_items = [item for item in gd[0] if os.path.exists(item['path'])]
+                    if len(valid_items) > 1:
+                        groups_to_keep.append((valid_items, gd[1], gd[2]))
+                        
+                for i in reversed(range(self.dedupe_content_layout.count())):
+                    item = self.dedupe_content_layout.itemAt(i)
+                    if item and item.widget():
+                        item.widget().setParent(None)
+                        item.widget().deleteLater()
+                        
+                if hasattr(self, 'thumb_worker') and self.thumb_worker and self.thumb_worker.isRunning():
+                    self.thumb_worker.stop()
+                    
+                self.thumb_labels_map.clear()
+                self.nav_groups = []
+                self.btn_auto_delete.setEnabled(True)
+                self.btn_scan_dupes.setEnabled(True)
+                
+                self.render_duplicates_ui(groups_to_keep)
             return
 
         chunk = self.delete_queue[:10]
@@ -2036,12 +2057,9 @@ class SettingsDialog(QDialog):
         super().accept()
 
     def download_alltags_db(self):
-        target_folder = self.db_path_input.text().strip()
-        if not target_folder or not os.path.exists(target_folder):
-            QMessageBox.warning(self, "Invalid Folder", "Please select a valid Library Folder first.")
-            return
-
-        db_path = os.path.join(target_folder, "AllTags.db")
+        appdata_dir = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "appdata")
+        os.makedirs(appdata_dir, exist_ok=True)
+        db_path = os.path.join(appdata_dir, "AllTags.db")
         if os.path.exists(db_path):
             reply = QMessageBox.question(self, "Database Exists", "AllTags.db already exists. Do you want to redownload it?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if reply == QMessageBox.StandardButton.No:
