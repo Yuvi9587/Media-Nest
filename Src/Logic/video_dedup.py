@@ -538,7 +538,6 @@ class VideoDedupTab(QWidget):
         self.lbl_time.setText(f"{format_ms(position)} / {format_ms(duration)}")
 
     def on_media_status_changed(self, status):
-        # Auto-play as soon as the media is actually ready (avoids 0xC00D6D60)
         if status in (QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia):
             if getattr(self, '_autoplay_pending', False):
                 self._autoplay_pending = False

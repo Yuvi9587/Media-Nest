@@ -62,7 +62,6 @@ class ManhwaReaderWidget(QWidget):
         self.current_target_width = 1000
         self.setMinimumWidth(self.viewport_width)
 
-        # Autoscroll state
         self._autoscroll_active = False
         self._autoscroll_global_origin = None
         self._autoscroll_viewport_origin = None
@@ -201,7 +200,6 @@ class ManhwaReaderWidget(QWidget):
                 self._autoscroll_viewport_origin = self.scroll_area.viewport().mapFromGlobal(self._autoscroll_global_origin)
                 self._autoscroll_timer.start(16)
                 
-                # Replace cursor with the SVG
                 if self.autoscroll_renderer:
                     pm = QPixmap(32, 32)
                     pm.fill(Qt.GlobalColor.transparent)

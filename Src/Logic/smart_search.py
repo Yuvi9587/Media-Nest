@@ -36,7 +36,6 @@ def parse_natural_language_query(query: str, cur) -> list[str]:
     matched_tags = []
     consumed_indices = set()
     
-    # 1. Check bigrams (greedy)
     for i in range(len(words) - 1):
         if i in consumed_indices or (i+1) in consumed_indices:
             continue
@@ -47,7 +46,6 @@ def parse_natural_language_query(query: str, cur) -> list[str]:
             consumed_indices.add(i)
             consumed_indices.add(i+1)
             
-    # 2. Check unigrams
     for i in range(len(words)):
         if i in consumed_indices:
             continue
@@ -56,18 +54,17 @@ def parse_natural_language_query(query: str, cur) -> list[str]:
         if best_name:
             matched_tags.append((best_name, best_type))
             
-    # 3. Classify into required and optional
     final_tags = []
     has_required = any(t[1] in ('character', 'series', 'artist', 'copyright', 'parody') for t in matched_tags)
     
     for name, tag_type in matched_tags:
         if tag_type in ('character', 'series', 'artist', 'copyright', 'parody'):
-            final_tags.append(name) # Required
+            final_tags.append(name) 
         else:
             if has_required:
-                final_tags.append(f"~{name}") # Optional if there are required tags
+                final_tags.append(f"~{name}") 
             else:
-                final_tags.append(name) # Required if no character tags present
+                final_tags.append(name) 
             
     return final_tags
 

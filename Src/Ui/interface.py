@@ -891,13 +891,12 @@ class MainWindowUI:
         
         self.tag_viewer_container.hide()
 
-        # Stacked widget: page 0 = Tags, page 1 = File Info
         self.bottom_stack = QStackedWidget()
-        self.bottom_stack.addWidget(self.tag_viewer_container)   # index 0
-        self.file_info_panel = self._build_file_info_panel()     # index 1
+        self.bottom_stack.addWidget(self.tag_viewer_container)   
+        self.file_info_panel = self._build_file_info_panel()     
         self.bottom_stack.addWidget(self.file_info_panel)
         self.bottom_stack.setCurrentIndex(0)
-        self.bottom_stack.hide()   # stays hidden until tags/file-info are needed
+        self.bottom_stack.hide()   
 
         self.sidebar_vertical_splitter.addWidget(self.bottom_stack)
         self.sidebar_layout.addWidget(self.sidebar_vertical_splitter)
@@ -1093,7 +1092,6 @@ class MainWindowUI:
         outer_layout.setContentsMargins(10, 8, 10, 10)
         outer_layout.setSpacing(6)
 
-        # ---- Header row: icon + title + close (×) button ----
         header_row = QHBoxLayout()
         header_row.setContentsMargins(0, 0, 0, 0)
         header_row.setSpacing(6)
@@ -1126,8 +1124,6 @@ class MainWindowUI:
                 color: white;
             }
         """)
-        # The actual connection is wired in show_file_info_in_stack / show_tags_in_stack
-        # We store the button so app.py can wire it after construction.
         panel.btn_close = btn_close
 
         header_row.addWidget(icon_lbl)
@@ -1136,7 +1132,6 @@ class MainWindowUI:
         header_row.addWidget(btn_close)
         outer_layout.addLayout(header_row)
 
-        # ---- Divider ----
         divider = QFrame()
         divider.setFrameShape(QFrame.Shape.HLine)
         divider.setStyleSheet(
@@ -1144,7 +1139,6 @@ class MainWindowUI:
         )
         outer_layout.addWidget(divider)
 
-        # ---- Info rows ----
         row_style_key   = "color: #7a7a9a; font-size: 0.85em;"
         row_style_value = "color: #d4d4d4; font-size: 0.85em;"
 
@@ -1177,4 +1171,4 @@ class MainWindowUI:
             outer_layout.addLayout(row)
 
         outer_layout.addStretch()
-        return panel
+        return panel

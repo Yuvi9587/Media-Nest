@@ -2,7 +2,6 @@ import sys
 import os
 
 if sys.platform == "win32":
-    # Force the Windows Media Foundation backend for hardware-accelerated 4K playback on low-end CPUs
     os.environ["QT_MEDIA_BACKEND"] = "windows"
 
 import io
@@ -421,7 +420,6 @@ class FileSizeBackfillWorker(QThread):
             conn.execute("PRAGMA journal_mode=WAL;")
             cursor = conn.cursor()
 
-            # Process Images table
             cursor.execute("SELECT hash, file_path FROM Images WHERE file_size IS NULL")
             rows = cursor.fetchall()
             updates = []
@@ -433,7 +431,6 @@ class FileSizeBackfillWorker(QThread):
                 cursor.executemany("UPDATE Images SET file_size = ? WHERE hash = ?", updates)
                 conn.commit()
 
-            # Process tagless table
             cursor.execute("SELECT hash, file_path FROM tagless WHERE file_size IS NULL")
             rows = cursor.fetchall()
             updates = []
@@ -463,7 +460,6 @@ class FileSizeBackfillWorker(QThread):
             conn.execute("PRAGMA journal_mode=WAL;")
             cursor = conn.cursor()
 
-            # Process Images table
             cursor.execute("SELECT hash, file_path FROM Images WHERE file_size IS NULL")
             rows = cursor.fetchall()
             updates = []
@@ -475,7 +471,6 @@ class FileSizeBackfillWorker(QThread):
                 cursor.executemany("UPDATE Images SET file_size = ? WHERE hash = ?", updates)
                 conn.commit()
 
-            # Process tagless table
             cursor.execute("SELECT hash, file_path FROM tagless WHERE file_size IS NULL")
             rows = cursor.fetchall()
             updates = []
@@ -873,9 +868,6 @@ class NsTabExpander(QObject):
             self.widget.setText(new_text)
             self.widget.setSelection(typed_end, len(new_text) - typed_end)
             self.widget.blockSignals(False)
-            # Emit textEdited so the completer knows the text has expanded to the full namespace.
-            # This makes DbLookupCompleter see "character:" instead of "char", causing its 
-            # search term to be empty (""), which closes the popup and prevents it from stealing the Tab key.
             self.widget.textEdited.emit(new_text)
 
     def eventFilter(self, obj, event):
@@ -1147,7 +1139,6 @@ class MediaExplorerApp(QMainWindow):
         except Exception:
             pass
 
-        # Patch theme font-size from saved config at startup
         try:
             import re as _re
             if getattr(sys, 'frozen', False):
@@ -1227,7 +1218,6 @@ class MediaExplorerApp(QMainWindow):
         self.ui.tree_view.expanded.connect(self.on_item_expanded)
         self.ui.tree_view.clicked.connect(self.on_tree_item_clicked)
 
-        # Wire the File Info panel close button to return to the Tags view
         self.ui.file_info_panel.btn_close.clicked.connect(self._on_file_info_closed)
         
         self.ui.gallery_section.list_widget.currentItemChanged.connect(self.on_gallery_item_changed)
@@ -1271,7 +1261,6 @@ class MediaExplorerApp(QMainWindow):
                     config = json.load(f)
                     perf_mode = config.get("performance_mode", "balanced")
 
-                    # Apply saved font size immediately at startup
                     saved_font_size = config.get("font_size", None)
                     if saved_font_size:
                         app_instance = QApplication.instance()
@@ -1381,7 +1370,6 @@ class MediaExplorerApp(QMainWindow):
             )
 
     def media_status_changed(self, status):
-        # Auto-play as soon as the media is actually ready (avoids 0xC00D6D60)
         if status in (QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia):
             if getattr(self, '_autoplay_pending', False):
                 self._autoplay_pending = False
@@ -1596,14 +1584,12 @@ class MediaExplorerApp(QMainWindow):
 
         panel = self.ui.file_info_panel
 
-        # Strip custom_manga: prefix if present
         display_path = path
         if display_path.startswith("custom_manga:"):
             parts = display_path.split("|")
             if len(parts) >= 2:
                 display_path = parts[1]
 
-        # Default values
         name = size_str = mod_str = resolution_str = duration_str = "—"
         ftype = "—"
 
@@ -1611,7 +1597,6 @@ class MediaExplorerApp(QMainWindow):
             name = os.path.basename(display_path) or display_path
             ext_lower = os.path.splitext(display_path)[1].lower()
 
-            # ── File type & size ──────────────────────────────────────────
             if os.path.isdir(display_path):
                 ftype = "Folder"
                 try:
@@ -1635,14 +1620,12 @@ class MediaExplorerApp(QMainWindow):
                 except OSError:
                     size_str = "—"
 
-            # ── Modified date ──────────────────────────────────────────────
             try:
                 mtime = os.path.getmtime(display_path)
                 mod_str = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d  %H:%M")
             except OSError:
                 mod_str = "—"
 
-            # ── Resolution & Duration ──────────────────────────────────────
             IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".tif"}
             VIDEO_EXTS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".wmv", ".m4v"}
 
@@ -1652,7 +1635,6 @@ class MediaExplorerApp(QMainWindow):
                     with _PILImage.open(display_path) as img:
                         w, h = img.size
                         resolution_str = f"{w} × {h} px"
-                        # For animated GIFs show frame count too
                         if ext_lower == ".gif":
                             try:
                                 frames = getattr(img, "n_frames", 1)
@@ -1664,7 +1646,6 @@ class MediaExplorerApp(QMainWindow):
                     resolution_str = "—"
 
             elif ext_lower in VIDEO_EXTS and not os.path.isdir(display_path):
-                # Try cv2 first (fast, no subprocess needed)
                 try:
                     import cv2 as _cv2
                     cap = _cv2.VideoCapture(display_path)
@@ -1685,7 +1666,6 @@ class MediaExplorerApp(QMainWindow):
                             else:
                                 duration_str = f"{m_part}:{s_part:02}"
                 except ImportError:
-                    # cv2 not installed — try ffprobe via subprocess
                     try:
                         import subprocess, json as _json
                         result = subprocess.run(
@@ -1728,7 +1708,6 @@ class MediaExplorerApp(QMainWindow):
         panel.lbl_info_path.setText(display_path)
         panel.lbl_info_path.setToolTip(display_path)
 
-        # Switch the stacked widget to the File Info page
         self.ui.show_file_info_in_stack()
 
 
@@ -2156,7 +2135,6 @@ class MediaExplorerApp(QMainWindow):
 
             if event.type() == QEvent.Type.KeyPress:
                 self.last_mouse_button = Qt.MouseButton.NoButton
-                # Only intercept file operations if the tree or gallery specifically has focus
                 if obj in (self.ui.tree_view, self.ui.gallery_section.list_widget):
                     if event.matches(QKeySequence.StandardKey.Copy):
                         self.shortcut_copy()
@@ -2700,7 +2678,6 @@ class MediaExplorerApp(QMainWindow):
 
         self.media_player.stop()
 
-        # Signal media_status_changed to auto-play once media is ready
         self._autoplay_pending = True
 
         self.media_player.setSource(QUrl.fromLocalFile(path))
@@ -2742,7 +2719,6 @@ class MediaExplorerApp(QMainWindow):
                 self.tag_fetch_worker.tags_fetched.connect(self.on_tags_fetched)
                 self.tag_fetch_worker.start()
             else:
-                # No DB — hide the bottom stack if we're on the Tags page
                 if self.ui.bottom_stack.currentIndex() == 0:
                     self.ui.bottom_stack.hide()
                     sizes = self.ui.sidebar_vertical_splitter.sizes()
@@ -2752,20 +2728,16 @@ class MediaExplorerApp(QMainWindow):
     def on_tags_fetched(self, tags):
         self.ui.tag_list_widget.clear()
         if tags:
-            # Only switch to tags if file-info is NOT currently showing
             if self.ui.bottom_stack.currentIndex() != 1:
                 self.ui.show_tags_in_stack()
             else:
-                # Tags updated silently; populate but don't steal the view
                 pass
-            self.ui.tag_viewer_container.show()   # keep internal visibility flag correct
+            self.ui.tag_viewer_container.show()   
             for tag in tags:
                 item = QListWidgetItem(tag)
                 self.ui.tag_list_widget.addItem(item)
-            # Make the bottom stack/tags visible
             self.ui.show_tags_in_stack()
         else:
-            # No tags — if file-info isn't showing, collapse the bottom section
             if self.ui.bottom_stack.currentIndex() == 0:
                 self.ui.bottom_stack.hide()
                 sizes = self.ui.sidebar_vertical_splitter.sizes()
@@ -3469,32 +3441,28 @@ class MediaExplorerApp(QMainWindow):
             cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangaPages (manga_id INTEGER, image_path TEXT, page_number INTEGER, attached_to_next BOOLEAN DEFAULT 0, PRIMARY KEY (manga_id, page_number))")
             cursor.execute("CREATE TABLE IF NOT EXISTS CustomMangaTags (manga_id INTEGER, tag_name TEXT, PRIMARY KEY (manga_id, tag_name))")
             
-            # Migrate Images table
             try:
                 cursor.execute("ALTER TABLE Images ADD COLUMN file_size INTEGER")
                 print("Added 'file_size' column to Images table.")
             except sqlite3.OperationalError:
-                pass  # Column already exists
+                pass  
 
-            # Migrate tagless table
             try:
                 cursor.execute("ALTER TABLE tagless ADD COLUMN file_size INTEGER")
                 print("Added 'file_size' column to tagless table.")
             except sqlite3.OperationalError:
-                pass  # Column already exists
+                pass  
 
-            # Migrate CustomMangaPages table
             try:
                 cursor.execute("ALTER TABLE CustomMangaPages ADD COLUMN attached_to_next BOOLEAN DEFAULT 0")
                 print("Added 'attached_to_next' column to CustomMangaPages table.")
             except sqlite3.OperationalError:
-                pass  # Column already exists
+                pass  
 
             self.db_connection.commit()
             
             self.upgrade_legacy_tags()
             
-            # Start background backfill worker for file sizes
             if not hasattr(self, 'file_size_worker') or not self.file_size_worker.isRunning():
                 self.file_size_worker = FileSizeBackfillWorker(db_path)
                 self.file_size_worker.start()

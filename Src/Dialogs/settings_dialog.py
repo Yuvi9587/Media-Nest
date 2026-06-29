@@ -308,7 +308,6 @@ class SettingsDialog(QDialog):
         scale_row.addStretch()
         ui_inner_layout.addLayout(scale_row)
 
-        # ── Font Size (real-time, no restart needed) ──────────────────────
         font_row = QHBoxLayout()
         lbl_font = QLabel("Font Size (Live):")
         lbl_font.setToolTip("Changes text size across the whole app instantly — no restart needed.")
@@ -320,7 +319,6 @@ class SettingsDialog(QDialog):
             label = f"{sz}px (Default)" if sz == 13 else f"{sz}px"
             self.combo_font_size.addItem(label, sz)
 
-        # Select current value
         for i in range(self.combo_font_size.count()):
             if self.combo_font_size.itemData(i) == self.current_font_size:
                 self.combo_font_size.setCurrentIndex(i)
@@ -568,7 +566,6 @@ class SettingsDialog(QDialog):
             return
         self.current_font_size = size
 
-        # Update preview label only
         if hasattr(self, '_font_preview_label'):
             self._font_preview_label.setStyleSheet(
                 f"color: #7ec8e3; font-style: italic; margin-left: 12px; font-size: {size}px;"
@@ -582,32 +579,22 @@ class SettingsDialog(QDialog):
         if not app:
             return
 
-        # 1. Apply to QApplication font using POINT size (avoids Qt internal setPointSize(-1) warnings).
-        #    Conversion: pt = px * 72 / 96  (at standard 96 DPI screen)
         pt = max(1, round(size * 72 / 96))
         app.setFont(QFont("Segoe UI", pt))
 
-        # 2. Patch the MAIN WINDOW stylesheet so the `QWidget { font-size: Xpx; }` rule is updated.
-        #    This is the authoritative rule that all child widgets (labels, buttons, tree, gallery…) inherit.
         if not self.main_app:
             return
 
         current_ss = self.main_app.styleSheet()
 
-        # Track what size we last applied so repeated changes still work.
         prev_size = getattr(self, '_last_applied_font_px', 13)
 
-        # Simple string replacement — reliable across Python versions and edge cases.
-        # The theme has exactly: `font-size: 13px;`
-        # After a previous call it has: `font-size: {prev_size}px;`
         old_token = f"font-size: {prev_size}px"
         new_token = f"font-size: {size}px"
 
         if old_token in current_ss:
-            # Replace only the FIRST occurrence (the QWidget base rule).
             patched_ss = current_ss.replace(old_token, new_token, 1)
         else:
-            # Fallback: prepend a QWidget font-size override rule.
             patched_ss = f"QWidget {{ font-size: {size}px; }}\n" + current_ss
 
         self.main_app.setStyleSheet(patched_ss)
@@ -1985,7 +1972,6 @@ class SettingsDialog(QDialog):
                     "You have changed the UI Scale.\n\nPlease restart Media Nest for the new scaling to take effect!"
                 )
 
-            # Font size — applies to entire app via stylesheet + QApplication font
             new_font_size = self.combo_font_size.itemData(self.combo_font_size.currentIndex())
             if new_font_size:
                 config["font_size"] = new_font_size
@@ -2088,7 +2074,6 @@ class SettingsDialog(QDialog):
                         if total_size > 0:
                             percent = int((downloaded / total_size) * 100)
                             self.pb_download_tags.setValue(percent)
-                            # processEvents is needed so the UI actually updates
                             QApplication.processEvents()
                 
             QApplication.restoreOverrideCursor()

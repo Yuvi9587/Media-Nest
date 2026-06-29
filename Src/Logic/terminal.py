@@ -23,9 +23,6 @@ from PyQt6.QtCore import Qt, QPoint
 from PyQt6.QtGui import QKeySequence, QShortcut, QTextDocument, QTextCursor
 
 
-# ─────────────────────────────────────────────
-#  Helper: parse --flag value from tokens
-# ─────────────────────────────────────────────
 def _parse_flags(tokens):
     """Return (positional_args, {flag: value}) from a token list.
     Supports  --flag value   and  --flag=value   and  bare --flag.
@@ -43,16 +40,13 @@ def _parse_flags(tokens):
                 flags[key] = tokens[i + 1]
                 i += 1
             else:
-                flags[key] = True        # bare flag
+                flags[key] = True        
         else:
             pos.append(tok)
         i += 1
     return pos, flags
 
 
-# ─────────────────────────────────────────────
-#  Terminal Spinner
-# ─────────────────────────────────────────────
 class TerminalSpinner:
     """A small animated spinner to indicate long-running tasks."""
     def __init__(self, label):
@@ -80,9 +74,6 @@ class TerminalSpinner:
         QApplication.processEvents()
 
 
-# ─────────────────────────────────────────────
-#  The Terminal Widget
-# ─────────────────────────────────────────────
 class TerminalDialog(QDialog):
     def __init__(self, db_manager, parent=None):
         super().__init__(parent)
@@ -96,19 +87,16 @@ class TerminalDialog(QDialog):
         self.resize(920, 580)
         self.setStyleSheet("background-color: #0c0c0c; color: #cccccc;")
 
-        # State
         self.history: list[str] = []
         self.history_idx = -1
-        self.pending_confirmation = None   # (func, args) waiting for Y/N
+        self.pending_confirmation = None   
 
-        # ── Layout ──────────────────────────────
         root = QVBoxLayout(self)
         root.setContentsMargins(5, 5, 5, 5)
         root.setSpacing(0)
 
         self.output = QTextEdit()
         self.output.setReadOnly(True)
-        # Allow text selection and copying in the read-only output area
         self.output.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse |
             Qt.TextInteractionFlag.TextSelectableByKeyboard
@@ -126,7 +114,6 @@ class TerminalDialog(QDialog):
         """)
         root.addWidget(self.output)
 
-        # Floating Search Bar
         self.search_frame = QFrame(self.output)
         self.search_frame.setStyleSheet("background-color: #1e1e1e; border: 1px solid #333; border-radius: 4px;")
         search_layout = QHBoxLayout(self.search_frame)
@@ -161,7 +148,6 @@ class TerminalDialog(QDialog):
         
         self.search_frame.hide()
 
-        # Search state
         self._last_search_term = ""
 
         inp_row = QHBoxLayout()
@@ -190,7 +176,6 @@ class TerminalDialog(QDialog):
         """)
         self.input_line.returnPressed.connect(self.process_command)
         self.input_line.installEventFilter(self)
-        # Right-click context menu on input
         self.input_line.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.input_line.customContextMenuRequested.connect(self._input_context_menu)
 
@@ -199,24 +184,17 @@ class TerminalDialog(QDialog):
         inp_row.addWidget(self.input_line)
         root.addLayout(inp_row)
 
-        # Keyboard shortcut: Ctrl+Shift+C copies the entire output log
         sc = QShortcut(QKeySequence("Ctrl+Shift+C"), self)
         sc.activated.connect(self._copy_all_output)
         
-        # Keyboard shortcut: Ctrl+F to find
         sc_find = QShortcut(QKeySequence("Ctrl+F"), self)
         sc_find.activated.connect(self._show_search)
         
-        # Keyboard shortcut: F3 to find next
         sc_find_next = QShortcut(QKeySequence("F3"), self)
         sc_find_next.activated.connect(self._search_next)
 
-        # ── Boot message ─────────────────────────
         self._boot()
 
-    # ─────────────────────────────────────────
-    #  Boot banner
-    # ─────────────────────────────────────────
     def _boot(self):
         self.print_msg("Media-Nest Power Terminal  [Version 2.0.0]", "#cccccc")
         self.print_msg("(c) Media-Nest Corporation.  All rights reserved.", "#cccccc")
@@ -224,12 +202,10 @@ class TerminalDialog(QDialog):
         self.print_msg("Type  <b>help</b>  to list all commands.", "#00bcd4")
         self.print_msg("")
 
-        # Set up SQLite progress handler to keep UI alive during heavy queries
-        # (fires every 1000 SQLite VM instructions)
         try:
             self.db.set_progress_handler(self._sqlite_progress, 1000)
         except AttributeError:
-            pass # fallback if db doesn't support it
+            pass 
 
     def _sqlite_progress(self):
         """Called automatically by SQLite during long queries."""
@@ -239,9 +215,6 @@ class TerminalDialog(QDialog):
             QApplication.processEvents()
         return 0
 
-    # ─────────────────────────────────────────
-    #  Search Features
-    # ─────────────────────────────────────────
     def _show_search(self):
         w, h = 280, 40
         self.search_frame.setGeometry(self.output.width() - w - 25, 10, w, h)
@@ -262,7 +235,6 @@ class TerminalDialog(QDialog):
         if not term:
             return
         if not self.output.find(term):
-            # Wrap around to start
             cursor = self.output.textCursor()
             cursor.movePosition(QTextCursor.MoveOperation.Start)
             self.output.setTextCursor(cursor)
@@ -273,20 +245,15 @@ class TerminalDialog(QDialog):
         if not term:
             return
         if not self.output.find(term, QTextDocument.FindFlag.FindBackward):
-            # Wrap around to end
             cursor = self.output.textCursor()
             cursor.movePosition(QTextCursor.MoveOperation.End)
             self.output.setTextCursor(cursor)
             self.output.find(term, QTextDocument.FindFlag.FindBackward)
 
-    # ─────────────────────────────────────────
-    #  Print helpers
-    # ─────────────────────────────────────────
     def print_msg(self, msg, color="#cccccc"):
         from PyQt6.QtGui import QTextCursor
         cursor = self.output.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
-        # Insert a newline before every line except the very first
         if not self.output.document().isEmpty():
             cursor.insertHtml("<br>")
         cursor.insertHtml(f"<span style='color:{color}; font-family:Consolas,\"Lucida Console\",monospace; font-size:14px;'>{msg}</span>")
@@ -300,9 +267,6 @@ class TerminalDialog(QDialog):
     def print_info(self, msg): self.print_msg(msg, "#00bcd4")
     def print_dim(self, msg):  self.print_msg(msg, "#808080")
 
-    # ─────────────────────────────────────────
-    #  Context menus & clipboard helpers
-    # ─────────────────────────────────────────
     _MENU_STYLE = """
         QMenu {
             background-color: #1e1e1e;
@@ -379,9 +343,6 @@ class TerminalDialog(QDialog):
         self.print_dim("[Copied all terminal output to clipboard]")
 
 
-    # ─────────────────────────────────────────
-    #  Key history navigation & Events
-    # ─────────────────────────────────────────
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if hasattr(self, 'search_frame') and self.search_frame.isVisible():
@@ -426,9 +387,6 @@ class TerminalDialog(QDialog):
                 self.input_line.setText(cmd)
                 return
 
-    # ─────────────────────────────────────────
-    #  Command dispatcher
-    # ─────────────────────────────────────────
     def process_command(self):
         raw = self.input_line.text().strip()
         if not raw:
@@ -436,12 +394,10 @@ class TerminalDialog(QDialog):
         self.input_line.clear()
         self.print_msg(f"Media-Nest&gt; {raw}", "#cccccc")
 
-        # Record history (no duplicates at top)
         if not self.history or self.history[-1] != raw:
             self.history.append(raw)
         self.history_idx = -1
 
-        # Pending Y/N confirmation
         if self.pending_confirmation:
             if raw.lower() in ("y", "yes"):
                 fn, args, kwargs = self.pending_confirmation
@@ -455,7 +411,6 @@ class TerminalDialog(QDialog):
                 self.print_dim("Aborted.")
             return
 
-        # Parse tokens, escaping backslashes so Windows paths aren't destroyed
         try:
             tokens = shlex.split(raw.replace("\\", "\\\\"))
         except ValueError as exc:
@@ -469,14 +424,12 @@ class TerminalDialog(QDialog):
         args = tokens[1:]
 
         dispatch = {
-            # ── BASIC ──
             "help":      self.cmd_help,
             "clear":     lambda _: self.output.clear(),
             "schema":    self.cmd_schema,
             "history":   self.cmd_history,
             "version":   self.cmd_version,
 
-            # ── LIBRARY INFO ──
             "stats":     self.cmd_stats,
             "count":     self.cmd_count,
             "ls":        self.cmd_ls,
@@ -488,20 +441,15 @@ class TerminalDialog(QDialog):
             "recent":    self.cmd_recent,
             "ext":       self.cmd_ext,
 
-            # ── TAG COMMANDS ──
             "tag":       self.cmd_tag,
 
-            # ── MANGA COMMANDS ──
             "manga":     self.cmd_manga,
 
-            # ── FILE COMMANDS ──
             "file":      self.cmd_file,
 
-            # ── DB COMMANDS ──
             "db":        self.cmd_db,
             "sql":       lambda _: self.cmd_sql(raw[4:]),
 
-            # ── ADVANCED ──
             "dupes":     self.cmd_dupes,
             "export":    self.cmd_export,
             "scan":      self.cmd_scan,
@@ -524,9 +472,6 @@ class TerminalDialog(QDialog):
         else:
             self.print_err(f"Unknown command '{cmd}'. Type 'help' for a list.")
 
-    # ═════════════════════════════════════════
-    #  BASIC COMMANDS
-    # ═════════════════════════════════════════
 
     def cmd_help(self, args=None):
         sections = [
@@ -782,9 +727,6 @@ class TerminalDialog(QDialog):
         for i, h in enumerate(self.history[-50:], 1):
             self.print_dim(f"  [{i:>3}] {h}")
 
-    # ═════════════════════════════════════════
-    #  SCHEMA
-    # ═════════════════════════════════════════
     def cmd_schema(self, _args=None):
         cur = self.db.cursor()
         cur.execute("SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
@@ -797,14 +739,10 @@ class TerminalDialog(QDialog):
             self.print_info(f"<br>Table: <b>{name}</b>")
             if sql:
                 self.print_dim(f"  {sql}")
-            # Column summary
             cols = self.db.cursor().execute(f"PRAGMA table_info({name})").fetchall()
             col_names = [c[1] for c in cols]
             self.print_dim(f"  Columns: {', '.join(col_names)}")
 
-    # ═════════════════════════════════════════
-    #  LIBRARY INFO
-    # ═════════════════════════════════════════
     def cmd_stats(self, _args=None):
         cur = self.db.cursor()
         img_count = cur.execute("SELECT COUNT(*) FROM Images").fetchone()[0]
@@ -834,18 +772,15 @@ class TerminalDialog(QDialog):
         self.print_msg(f"  &nbsp;Tag-file associations : <b>{img_tag_count:,}</b>")
         self.print_msg(f"  &nbsp;Ignored dedup pairs   : <b>{ignored_count:,}</b>")
 
-        # avg tags per file
         if img_count:
             avg = img_tag_count / img_count
             self.print_msg(f"  &nbsp;Avg tags per file      : <b>{avg:.1f}</b>")
 
     def cmd_count(self, args=None):
         pos, flags = _parse_flags(args or [])
-        # Accept: count female  OR  count --tag female  OR  count (total)
         tag = flags.get("tag") or (pos[0] if pos else None)
         cur = self.db.cursor()
         if tag:
-            # Exact match — JOIN Images ensures we only count files that still exist
             exact = cur.execute(
                 "SELECT COUNT(DISTINCT i.hash) FROM Images i "
                 "JOIN ImageTags it ON it.hash=i.hash "
@@ -854,7 +789,6 @@ class TerminalDialog(QDialog):
             if exact > 0:
                 self.print_ok(f"Files tagged '{tag}': {exact:,}")
             else:
-                # Fall back to partial (LIKE) match
                 rows = cur.execute(
                     "SELECT t.tag_name, COUNT(DISTINCT i.hash) as cnt "
                     "FROM Images i "
@@ -1082,11 +1016,7 @@ class TerminalDialog(QDialog):
             for (p,) in paths:
                 self.print_dim(f"       → {p}")
 
-    # ═════════════════════════════════════════
-    #  TAG COMMANDS
-    # ═════════════════════════════════════════
     def cmd_tag(self, args):
-        # Default to 'list' when no subcommand given, or when only flags passed (e.g. tag --limit 5)
         if not args or args[0].startswith("--"):
             self._tag_list(args or [])
             return
@@ -1184,7 +1114,6 @@ class TerminalDialog(QDialog):
         tag_name = pos[0]
         cur = self.db.cursor()
 
-        # Get or create the tag
         existing = cur.execute("SELECT tag_id FROM Tags WHERE tag_name=?", (tag_name,)).fetchone()
         if existing:
             tag_id = existing[0]
@@ -1433,12 +1362,6 @@ class TerminalDialog(QDialog):
         for (name,) in rows:
             self.print_dim(f"  {name}")
 
-    # ═════════════════════════════════════════
-    #  FILE COMMANDS
-    # ═════════════════════════════════════════
-    # ═════════════════════════════════════════
-    #  MANGA COMMANDS
-    # ═════════════════════════════════════════
     def cmd_manga(self, args):
         if not args:
             self.print_err("Usage: manga <list|info|create|delete|rename|tag-add|tag-remove|page-add|page-remove|page-attach|page-detach>")
@@ -1622,7 +1545,6 @@ class TerminalDialog(QDialog):
         self.print_msg(f"  Name  : {fn}")
         self.print_msg(f"  Path  : {fp}")
         self.print_msg(f"  Hash  : {h}")
-        # Disk info
         if os.path.exists(fp):
             import datetime
             size  = os.path.getsize(fp)
@@ -1631,7 +1553,6 @@ class TerminalDialog(QDialog):
             self.print_msg(f"  Mtime : {mtime}")
         else:
             self.print_warn("  [File not found on disk]")
-        # Tags
         tags = cur.execute(
             "SELECT t.tag_name FROM Tags t "
             "JOIN ImageTags it ON it.tag_id=t.tag_id "
@@ -1728,9 +1649,6 @@ class TerminalDialog(QDialog):
         self.db.commit()
         self.print_ok(f"Updated path: '{old}' → '{new}'")
 
-    # ═════════════════════════════════════════
-    #  DB COMMANDS
-    # ═════════════════════════════════════════
     def cmd_db(self, args):
         if not args:
             self.print_err("Usage: db [optimize|integrity|size|tables]")
@@ -1786,9 +1704,6 @@ class TerminalDialog(QDialog):
         else:
             self.print_err(f"Unknown db subcommand: '{sub}'")
 
-    # ═════════════════════════════════════════
-    #  RAW SQL
-    # ═════════════════════════════════════════
     def cmd_sql(self, raw_args):
         query = (raw_args if isinstance(raw_args, str) else " ".join(raw_args)).strip()
         if not query:
@@ -1829,15 +1744,11 @@ class TerminalDialog(QDialog):
         except Exception as e:
             self.print_err(f"SQL Error: {e}")
 
-    # ═════════════════════════════════════════
-    #  EXPORT
-    # ═════════════════════════════════════════
     def cmd_export(self, args):
         _, flags = _parse_flags(args or [])
         tag = flags.get("tag")
         out = flags.get("out")
 
-        # Determine what to export
         if not args:
             self.print_err("Usage: export tags --out <file> | export files --tag <t> --out <file>")
             return
@@ -1876,9 +1787,6 @@ class TerminalDialog(QDialog):
         else:
             self.print_err(f"Unknown export type: '{sub}'")
 
-    # ═════════════════════════════════════════
-    #  Utilities
-    # ═════════════════════════════════════════
     @staticmethod
     def _fmt_bytes(n):
         for unit in ("B", "KB", "MB", "GB", "TB"):
@@ -1887,10 +1795,6 @@ class TerminalDialog(QDialog):
             n /= 1024
         return f"{n:.1f} PB"
 
-    # ═════════════════════════════════════════
-    #  SCAN COMMAND
-    # ═════════════════════════════════════════
-    # Supported media extensions (same set the importer recognises)
     _MEDIA_EXTS = {
         ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".tif",
         ".mp4", ".webm", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v",
@@ -1926,7 +1830,6 @@ class TerminalDialog(QDialog):
 
         pos, flags = _parse_flags(args)
 
-        # First positional = folder, second optional = subcommand
         folder    = pos[0] if pos else None
         subcmd    = (pos[1].lower() if len(pos) > 1 else "new")
         ext_filter= flags.get("ext", "").lower()
@@ -1968,7 +1871,6 @@ class TerminalDialog(QDialog):
         else:
             self.print_err(f"Unknown scan subcommand '{subcmd}'. Try: new, untagged, missing, dupes, big, small, all")
 
-    # ── helpers ──────────────────────────────────────────────────────────────
 
     def _iter_files(self, folder, ext_filter, no_recurse):
         """Walk folder and yield absolute file paths matching the ext filter."""
@@ -2017,7 +1919,6 @@ class TerminalDialog(QDialog):
             except IOError as e:
                 self.print_err(f"Could not write output file: {e}")
 
-    # ── scan new ─────────────────────────────────────────────────────────────
     def _scan_new(self, folder, ext_filter, limit, use_hash, out_file, no_recurse):
         self.print_msg("<br><b style='color:#8957e5;'>-- SCAN: NEW (not in library) --</b>")
         QApplication.processEvents()
@@ -2025,7 +1926,6 @@ class TerminalDialog(QDialog):
         cur = self.db.cursor()
 
         if use_hash:
-            # Hash-based: slower but catches renamed files
             known_hashes = set(r[0] for r in cur.execute("SELECT hash FROM Images").fetchall())
             new_files, checked = [], 0
             for fpath in self._iter_files(folder, ext_filter, no_recurse):
@@ -2038,12 +1938,9 @@ class TerminalDialog(QDialog):
                     new_files.append(fpath)
             self.print_ok(f"Scanned {checked:,} files. {len(new_files):,} not in library (by MD5):")
         else:
-            # Path-based: fast, catches files the DB doesn't know about by path
             known_paths = set(r[0] for r in cur.execute("SELECT file_path FROM Images").fetchall())
-            # Also check tagless queue
             known_paths.update(r[0] for r in cur.execute("SELECT file_path FROM tagless").fetchall())
             
-            # Pre-normalize to O(1) lookups
             normalized_known = {os.path.normpath(p) for p in known_paths if p}
             
             new_files, checked = [], 0
@@ -2072,7 +1969,6 @@ class TerminalDialog(QDialog):
             self.print_dim(msg)
         self._write_out(out_lines, out_file)
 
-    # ── scan untagged ────────────────────────────────────────────────────────
     def _scan_untagged(self, folder, ext_filter, limit, out_file):
         self.print_msg("<br><b style='color:#8957e5;'>-- SCAN: UNTAGGED (in library, no tags) --</b>")
         QApplication.processEvents()
@@ -2086,7 +1982,6 @@ class TerminalDialog(QDialog):
             "WHERE it.hash IS NULL"
         ).fetchall()
 
-        # Filter to the scanned folder
         filtered = []
         for (p,) in rows:
             if ext_filter and not p.lower().endswith(ext_filter):
@@ -2106,7 +2001,6 @@ class TerminalDialog(QDialog):
             self.print_dim(msg)
         self._write_out(out_lines, out_file)
 
-    # ── scan missing ─────────────────────────────────────────────────────────
     def _scan_missing(self, limit, out_file):
         self.print_msg("<br><b style='color:#8957e5;'>-- SCAN: MISSING (DB records with no file on disk) --</b>")
         QApplication.processEvents()
@@ -2131,7 +2025,6 @@ class TerminalDialog(QDialog):
             self.print_dim("  Tip: run  file delete --orphans  to purge these records.")
         self._write_out(out_lines, out_file)
 
-    # ── scan dupes ───────────────────────────────────────────────────────────
     def _scan_dupes(self, folder, ext_filter, limit, out_file, no_recurse):
         self.print_msg("<br><b style='color:#8957e5;'>-- SCAN: CONTENT DUPES (same MD5) --</b>")
         self.print_dim("  Computing MD5 hashes... (this may take a moment for large folders)")
@@ -2171,7 +2064,6 @@ class TerminalDialog(QDialog):
             self.print_dim(msg)
         self._write_out(out_lines, out_file)
 
-    # ── scan big / small ─────────────────────────────────────────────────────
     def _scan_size(self, folder, ext_filter, limit, out_file, no_recurse, biggest=True):
         label = "BIG" if biggest else "SMALL"
         self.print_msg(f"<br><b style='color:#8957e5;'>-- SCAN: {label} --</b>")

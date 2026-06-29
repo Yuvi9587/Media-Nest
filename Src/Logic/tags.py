@@ -253,13 +253,12 @@ class UniversalMediaViewer(QWidget):
         self.stack.setCurrentIndex(0)
         self.image_label.clear_image(text)
 
-# ── Namespace colour palette ────────────────────────────────────────────────
 NS_COLORS = {
-    'character': QColor('#c792ea'),   # purple
-    'artist':    QColor('#82aaff'),   # blue
-    'series':    QColor('#ffcb6b'),   # gold
-    'general':   QColor('#c3e88d'),   # green
-    'metadata':  QColor('#f78c6c'),   # orange
+    'character': QColor('#c792ea'),   
+    'artist':    QColor('#82aaff'),   
+    'series':    QColor('#ffcb6b'),   
+    'general':   QColor('#c3e88d'),   
+    'metadata':  QColor('#f78c6c'),   
 }
 NS_BG = {
     'character': QColor(60, 30, 80, 160),
@@ -275,7 +274,6 @@ class NsColorModel(QStringListModel):
     via Qt's standard data roles — works reliably even when a QSS stylesheet is set."""
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        # Raw stored value is always "ns:tagname"
         raw = super().data(index, Qt.ItemDataRole.DisplayRole) or ""
         ns = raw.split(':', 1)[0] if ':' in raw else 'general'
 
@@ -285,11 +283,9 @@ class NsColorModel(QStringListModel):
         if role == Qt.ItemDataRole.BackgroundRole:
             return NS_BG.get(ns, QColor(40, 40, 40, 180))
 
-        # UserRole: return the raw "ns:tag" string for pathFromIndex
         if role == Qt.ItemDataRole.UserRole:
             return raw
 
-        # DisplayRole: show a short badge prefix so the user can see the namespace
         if role == Qt.ItemDataRole.DisplayRole:
             if ':' in raw:
                 ns_part, tag_part = raw.split(':', 1)
@@ -308,14 +304,14 @@ class DbLookupCompleter(QCompleter):
         super().__init__(self._result_model, parent)
         self.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
-        self.setFilterMode(Qt.MatchFlag.MatchContains)  # safe: model only has 25 items
+        self.setFilterMode(Qt.MatchFlag.MatchContains)  
         self.setMaxVisibleItems(12)
 
         self._alltags_db = None
         self._library_db = None
         self._debounce = QTimer()
         self._debounce.setSingleShot(True)
-        self._debounce.setInterval(450)   # ms after last keystroke
+        self._debounce.setInterval(450)   
         self._debounce.timeout.connect(self._do_lookup)
         self._last_term = ""
 
@@ -356,9 +352,7 @@ class DbLookupCompleter(QCompleter):
 
     def on_text_changed(self, text):
         """Call this from the widget's textChanged signal."""
-        # Extract the last token (after the last comma)
         last = text.split(',')[-1].strip() if ',' in text else text.strip()
-        # Strip namespace prefix for the DB search term
         term = last.split(':', 1)[1].strip() if ':' in last else last
         if len(term) < 2:
             self._result_model.setStringList([])
@@ -378,7 +372,6 @@ class DbLookupCompleter(QCompleter):
             ('GeneralTags',   'general'),
             ('MetadataTags',  'metadata'),
         ]
-        # Query AllTags.db
         if self._alltags_db and os.path.exists(self._alltags_db):
             try:
                 conn = sqlite3.connect(self._alltags_db)
@@ -395,7 +388,6 @@ class DbLookupCompleter(QCompleter):
                 conn.close()
             except Exception:
                 pass
-        # Also query library.db Tags for locally known tags not in AllTags.db
         if self._library_db and os.path.exists(self._library_db):
             try:
                 conn = sqlite3.connect(self._library_db)
@@ -429,14 +421,10 @@ class DbLookupCompleter(QCompleter):
             popup.setFixedWidth(max(widget.width(), 320))
             self._apply_popup_style()
 
-    # --- multi-tag support ---
     def pathFromIndex(self, index):
-        # The model's DisplayRole returns "[CHAR]  tagname" — we want the raw "character:tagname"
         raw = self._result_model.data(index, Qt.ItemDataRole.UserRole) or ""
         if not raw:
-            # Fall back: reconstruct from display text
             display = super().pathFromIndex(index)
-            # Strip "[XXXX]  " badge prefix if present
             import re
             display = re.sub(r'^\[[A-Z]+\]\s+', '', display)
             raw = display
@@ -452,7 +440,6 @@ class DbLookupCompleter(QCompleter):
         return [path.strip()]
 
 
-# Keep old name as alias so nothing else breaks
 MultiTagCompleter = DbLookupCompleter
 
 
@@ -769,7 +756,6 @@ class ModelDownloadDialog(QDialog):
 
 class TaglessInboxLoaderWorker(QThread):
     """Fetches tagless file records from the DB and validates paths off the main thread."""
-    # (valid_rows, invalid_hashes) where valid_rows = [(file_name, file_path, file_hash), ...]
     finished = pyqtSignal(list, list)
 
     def __init__(self, library_db):
@@ -784,7 +770,6 @@ class TaglessInboxLoaderWorker(QThread):
             conn.execute("PRAGMA journal_mode=WAL;")
             cursor = conn.cursor()
 
-            # Deduplicate tagless table
             cursor.execute("""
                 DELETE FROM tagless
                 WHERE rowid NOT IN (
@@ -812,7 +797,7 @@ class TaglessInboxLoaderWorker(QThread):
 class GlobalTagLoaderWorker(QThread):
     """Loads all tags from AllTags.db, library.db, and characters.db in the
     background so the main UI thread never freezes, even with 1.6M tags."""
-    finished = pyqtSignal(list, set)   # (combined_list, known_gelbooru_chars)
+    finished = pyqtSignal(list, set)   
 
     def __init__(self, library_db, characters_db, alltags_db):
         super().__init__()
@@ -830,7 +815,6 @@ class GlobalTagLoaderWorker(QThread):
             if name not in tag_dict or prio.get(ns, 1) > prio.get(tag_dict.get(name, 'general'), 1):
                 tag_dict[name] = ns
 
-        # 1. library.db tags
         if os.path.exists(self.library_db):
             try:
                 conn = sqlite3.connect(self.library_db)
@@ -848,7 +832,6 @@ class GlobalTagLoaderWorker(QThread):
             except Exception:
                 pass
 
-        # 2. AllTags.db — the big one, done on background thread
         if os.path.exists(self.alltags_db):
             try:
                 conn = sqlite3.connect(self.alltags_db)
@@ -876,7 +859,6 @@ class GlobalTagLoaderWorker(QThread):
             except Exception:
                 pass
 
-        # 3. characters.db
         if os.path.exists(self.characters_db):
             try:
                 conn = sqlite3.connect(self.characters_db)
@@ -1136,7 +1118,7 @@ class TagManagerTab(QWidget):
         self.pending_cloud_matches = {}
         self.pending_tag_changes = {}
         self.pending_renames = {}
-        self._retiring_workers = []   # keeps old workers alive until their thread exits
+        self._retiring_workers = []   
 
         from Src.Logic.app import SingleThumbnailThread, VideoThumbnailer, NsTabExpander
 
@@ -1552,7 +1534,6 @@ class TagManagerTab(QWidget):
         except Exception:
             pass
         self._retiring_workers.append(worker)
-        # QThread emits its own built-in finished() when the OS thread is truly done
         worker.finished.connect(lambda: self._retiring_workers.remove(worker)
                                 if worker in self._retiring_workers else None)
         worker.quit()
@@ -1564,12 +1545,9 @@ class TagManagerTab(QWidget):
         os.makedirs(appdata_dir, exist_ok=True)
         alltags_db = os.path.join(appdata_dir, "AllTags.db")
 
-        # Add Tag completer gets the full 1.6M database + local library
         self.tag_completer.set_db_paths(alltags_db, library_db)
-        # Search Index completer ONLY gets the local library (no point suggesting tags that aren't on files)
         self.search_completer.set_db_paths("", library_db)
 
-        # Retire any previous worker without blocking the main thread
         if hasattr(self, '_tag_loader') and self._tag_loader:
             self._retire_worker(self._tag_loader)
 
@@ -1582,7 +1560,6 @@ class TagManagerTab(QWidget):
         self.tag_completer_model.setStringList(combined_list)
         self.known_gelbooru_chars = known_chars
 
-        # Give the live-lookup completers their DB paths so they can start working
         appdata_dir = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "appdata")
         alltags_db = os.path.join(appdata_dir, "AllTags.db")
         library_db, _ = self.get_db_paths()
@@ -1600,7 +1577,6 @@ class TagManagerTab(QWidget):
         if not os.path.exists(library_db):
             return
 
-        # Retire any previous loader without blocking the main thread
         if hasattr(self, '_inbox_loader') and self._inbox_loader:
             self._retire_worker(self._inbox_loader)
 
@@ -1610,7 +1586,6 @@ class TagManagerTab(QWidget):
 
     def _on_inbox_loaded(self, valid_rows, invalid_hashes):
         """Called on the main thread; batch-adds inbox items to avoid a single-frame freeze."""
-        # Clean up invalid hashes in library using shared conn
         if invalid_hashes:
             try:
                 conn = self.settings_dialog.shared_conn
@@ -1622,7 +1597,6 @@ class TagManagerTab(QWidget):
             except Exception as e:
                 self.log(f"TAGLESS CLEANUP ERR: {e}")
 
-        # Stop any previous batch timer BEFORE creating a new one
         if hasattr(self, '_inbox_batch_timer') and self._inbox_batch_timer is not None:
             self._inbox_batch_timer.stop()
             self._inbox_batch_timer.deleteLater()
@@ -1632,14 +1606,12 @@ class TagManagerTab(QWidget):
             self.log(f"[DB: library.db] Tagless Queue synchronized. (0 items)")
             return
 
-        # Store rows so we can feed them in batches
         self._inbox_pending_rows = list(valid_rows)
         self._inbox_img_queue = []
         self._inbox_vid_queue = []
 
-        # Use a timer to add items in batches of 50 so the UI stays responsive
         self._inbox_batch_timer = QTimer(self)
-        self._inbox_batch_timer.setInterval(0)   # next event-loop tick
+        self._inbox_batch_timer.setInterval(0)   
         self._inbox_batch_timer.timeout.connect(self._add_inbox_batch)
         self._inbox_batch_timer.start()
 
@@ -1672,7 +1644,6 @@ class TagManagerTab(QWidget):
                 self._inbox_img_queue.append(file_path)
 
         if not self._inbox_pending_rows:
-            # All done — kick off thumbnails
             self._inbox_batch_timer.stop()
             if self._inbox_img_queue:
                 self.thumb_worker.add_to_queue(self._inbox_img_queue)
@@ -1723,7 +1694,7 @@ class TagManagerTab(QWidget):
 
             if ns:
                 if not tag:
-                    continue  # Prevent massive queries when user just autocompleted the namespace prefix
+                    continue  
                 conditions.append("""
                     hash IN (
                         SELECT it.hash
@@ -1915,7 +1886,6 @@ class TagManagerTab(QWidget):
             filtered_tags = []
             for ns, tag_name in source_tags:
                 search_ns = ns + ":" if ns != 'general' else 'general:'
-                # For empty namespace compatibility we also check ''
                 if search_ns in self.copy_tags_namespaces or (ns == 'general' and '' in self.copy_tags_namespaces):
                     filtered_tags.append((ns, tag_name))
             
@@ -2011,7 +1981,6 @@ class TagManagerTab(QWidget):
             if data and isinstance(data, dict) and "tag_name" in data:
                 current_tags.append((data.get("ns", "general"), data["tag_name"]))
             else:
-                # fallback for items added without data
                 tag_text = item.text().replace("☁️ ", "").replace("☁️", "").strip()
                 import re
                 tag_text = re.sub(r'^\[[A-Z]+\]\s+', '', tag_text)
@@ -2425,7 +2394,6 @@ class TagManagerTab(QWidget):
                 cursor.execute("DELETE FROM tagless WHERE hash = ?", (file_hash,))
 
                 if tags and file_hash not in self.pending_cloud_matches:
-                    # extract tag strings for cloud upload queue
                     tag_strs = [t[1] if isinstance(t, tuple) else t for t in tags]
                     upload_queue.append((file_hash, tag_strs))
 

@@ -58,18 +58,15 @@ class DbRepairWorker(QThread):
         
         broken = []
         
-        # 1. Main Images table
         cur.execute("SELECT hash, file_path, file_name FROM Images")
         rows = cur.fetchall()
         for h, p, n in rows:
             if not os.path.exists(p):
                 broken.append((h, p, n))
                 
-        # Helper to check if a path is already tracked
         def path_tracked(path):
             return any(bp == path for _, bp, _ in broken)
 
-        # 2. CustomMangaPages
         try:
             cur.execute("SELECT image_path FROM CustomMangaPages")
             for (p,) in cur.fetchall():
@@ -77,9 +74,8 @@ class DbRepairWorker(QThread):
                     fake_h = "CUSTOM:" + hashlib.md5(p.encode('utf-8', errors='ignore')).hexdigest()
                     broken.append((fake_h, p, os.path.basename(p)))
         except sqlite3.OperationalError:
-            pass # Table might not exist yet
+            pass 
 
-        # 3. CustomMangas covers
         try:
             cur.execute("SELECT cover_image FROM CustomMangas")
             for (p,) in cur.fetchall():
@@ -89,7 +85,6 @@ class DbRepairWorker(QThread):
         except sqlite3.OperationalError:
             pass
 
-        # 4. MangaGalleries folders
         try:
             cur.execute("SELECT folder_path FROM MangaGalleries")
             for (p,) in cur.fetchall():
@@ -693,7 +688,6 @@ class DbRepairTab(QWidget):
                             "UPDATE tagless SET file_path = ?, file_name = ? WHERE hash = ?",
                             (new_path, new_name, h))
                             
-                    # Always try to update custom mangas just in case it's in both
                     try:
                         cursor.execute(
                             "UPDATE CustomMangaPages SET image_path = ? WHERE image_path = ?",
@@ -766,7 +760,6 @@ class DbRepairTab(QWidget):
             conn.execute("PRAGMA journal_mode=WAL;")
             cursor = conn.cursor()
             
-            # Map hashes to paths so we can delete CustomManga entries properly
             hash_to_path = {h: p for h, p, n in self._orphan_data}
             
             for h in selected_hashes:
@@ -775,12 +768,10 @@ class DbRepairTab(QWidget):
                     cursor.execute("DELETE FROM ImageTags WHERE hash = ?", (h,))
                     cursor.execute("DELETE FROM tagless WHERE hash = ?",   (h,))
                 
-                # Delete from CustomManga tables using the old path
                 old_path = hash_to_path.get(h)
                 if old_path:
                     try:
                         cursor.execute("DELETE FROM CustomMangaPages WHERE image_path = ?", (old_path,))
-                        # Don't delete the manga itself, just clear the cover if it's dead
                         cursor.execute("UPDATE CustomMangas SET cover_image = NULL WHERE cover_image = ?", (old_path,))
                     except sqlite3.OperationalError:
                         pass
