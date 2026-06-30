@@ -1,6 +1,6 @@
 # Media Nest
 
-**Media Nest** is a local media manager and viewer for browsing, tagging, and your collection of images, GIFs, videos, manga, and manhwa — all from one clean, dark-themed app.
+**Media Nest** is a local media manager and viewer for browsing, tagging, for your collection of images, GIFs, videos, manga, and manhwa — all from one clean, dark-themed app.
 
 ---
 
