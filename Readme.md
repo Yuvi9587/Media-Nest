@@ -139,7 +139,7 @@ Media-Nest requires Python 3.10 or later. The main dependencies include PyQt6, O
   </li>
 </ol>
 
-<pre><code>pip install PyQt6 pillow imagehash onnxruntime opencv-python send2trash requests</code></pre>
+<pre><code>pip install -r requirements.txt</code></pre>
 
 <ol start="3">
   <li>Run the main Python file to start the application.</li>
