@@ -354,6 +354,7 @@ The first tab. Lets you change the folder where your `library.db` library file l
 |---|---|
 | **Library Folder** input | Shows the current database folder path |
 | **Browse...** button | Opens a folder picker to select a new location |
+| **Download 1.6M Tags DB** button | Downloads `AllTags.db` from Hugging Face into your app data folder. This is a massive, optional database containing over 1.6 million globally known tags (character names, artists, series). Once downloaded, it runs in a background thread to instantly provide advanced tag autocomplete suggestions anywhere in the app (Search Bar, Tag Manager, Pagination Tab) without freezing the UI. |
 
 #### Database Repair
 
