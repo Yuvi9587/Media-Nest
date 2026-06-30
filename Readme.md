@@ -4,7 +4,7 @@
 
 # Media-Nest
 
-Media-Nest is a high-performance desktop application designed for organizing, viewing, and managing extensive local image and video libraries. It focuses heavily on performance, leveraging multithreading and background processing to ensure the user interface remains responsive even when dealing with thousands of files.
+Media-Nest is a desktop application built to help you organize, browse, and manage large collections of photos and videos stored on your computer. It's designed with performance in mind, using multithreading and background processing to keep everything fast and responsive, even when you're working with thousands of files.
 
 </td>
 
