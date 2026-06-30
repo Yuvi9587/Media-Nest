@@ -15,7 +15,7 @@ Media-Nest is a desktop application for organizing, browsing, and managing large
 </table>
 
 <p align="center">
-  <img src="assets/1.png" alt="Main Interface" width="100%">
+  <img src="assets/Preview1.png" alt="Main Interface" width="100%">
 </p>
 
 <h2>Core Features</h2>
@@ -56,7 +56,7 @@ Media-Nest includes built in tools for finding duplicate files and helping you f
 </ul>
 
 <p align="center">
-  <img src="assets/2.png" alt="Media Viewer" width="100%">
+  <img src="assets/Preview2.png" alt="Media Viewer" width="100%">
 </p>
 
 <h3>AI Auto Tagging</h3>
